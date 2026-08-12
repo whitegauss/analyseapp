@@ -1,6 +1,9 @@
 # Env files
 .env
 
+# Local work log (not shared via git)
+WORKLOG.md
+
 # Go
 backend/api/api
 
