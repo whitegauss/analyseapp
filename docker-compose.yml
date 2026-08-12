@@ -1,0 +1,25 @@
+services:
+  api:
+    build: ./backend/api
+    ports:
+      - "${API_PORT:-8080}:8080"
+    environment:
+      API_PORT: "8080"
+      REDIS_ADDR: "redis:6379"
+      WORKER_BASE_URL: "http://worker:8001"
+      SUPABASE_URL: "${SUPABASE_URL:-}"
+      SUPABASE_ANON_KEY: "${SUPABASE_ANON_KEY:-}"
+      SUPABASE_SERVICE_ROLE_KEY: "${SUPABASE_SERVICE_ROLE_KEY:-}"
+    depends_on:
+      - worker
+      - redis
+
+  worker:
+    build: ./backend/worker
+    ports:
+      - "${WORKER_PORT:-8001}:8001"
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"

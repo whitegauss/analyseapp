@@ -1,0 +1,10 @@
+# Env files
+.env
+
+# Go
+backend/api/api
+
+# Python
+__pycache__/
+*.pyc
+.venv/
