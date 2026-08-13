@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { signOut } from "./actions";
+import ExperimentEditor from "@/components/ExperimentEditor";
 
 export const dynamic = "force-dynamic";
 
@@ -28,8 +29,8 @@ export default async function Home() {
   } = await supabase.auth.getUser();
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 dark:bg-black">
-      <main className="flex w-full max-w-xl flex-col gap-6 rounded-lg border border-zinc-200 bg-white p-8 dark:border-zinc-800 dark:bg-zinc-900">
+    <div className="flex min-h-screen justify-center bg-zinc-50 p-8 dark:bg-black">
+      <main className="flex w-full max-w-5xl flex-col gap-6 rounded-lg border border-zinc-200 bg-white p-8 dark:border-zinc-800 dark:bg-zinc-900">
         <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
           AnalyseApp
         </h1>
@@ -63,6 +64,15 @@ export default async function Home() {
             </>
           )}
         </div>
+
+        {user && (
+          <div className="flex flex-col gap-4">
+            <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
+              実験データを追加
+            </h2>
+            <ExperimentEditor />
+          </div>
+        )}
 
         <div className="flex flex-col gap-2">
           <h2 className="text-sm font-medium text-zinc-500 dark:text-zinc-400">
