@@ -1,5 +1,7 @@
-// Package httpserver wires the HTTP router and the unified response envelope.
-package httpserver
+// Package response provides the unified API response envelope
+// (PDR.md section 8: {data, error, meta}), shared by httpserver and auth so
+// neither has to import the other.
+package response
 
 import (
 	"encoding/json"

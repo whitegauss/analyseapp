@@ -7,12 +7,19 @@ services:
       API_PORT: "8080"
       REDIS_ADDR: "redis:6379"
       WORKER_BASE_URL: "http://worker:8001"
+      DATABASE_URL: "${DATABASE_URL:-}"
       SUPABASE_URL: "${SUPABASE_URL:-}"
-      SUPABASE_ANON_KEY: "${SUPABASE_ANON_KEY:-}"
-      SUPABASE_SERVICE_ROLE_KEY: "${SUPABASE_SERVICE_ROLE_KEY:-}"
     depends_on:
       - worker
       - redis
+
+  migrate:
+    build: ./backend/api
+    entrypoint: ["migrate"]
+    environment:
+      DATABASE_URL: "${DATABASE_URL:-}"
+    profiles:
+      - tools
 
   worker:
     build: ./backend/worker
@@ -25,7 +32,11 @@ services:
       - "6379:6379"
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_SUPABASE_URL: "${NEXT_PUBLIC_SUPABASE_URL:-}"
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: "${NEXT_PUBLIC_SUPABASE_ANON_KEY:-}"
     ports:
       - "${FRONTEND_PORT:-3000}:3000"
     environment:
