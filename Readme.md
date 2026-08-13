@@ -4,13 +4,13 @@
 
 ## 技術スタック
 - **API Gateway/BFF**: Go（[go-chi](https://github.com/go-chi/chi) + [zerolog](https://github.com/rs/zerolog)）
-- **解析ワーカー**: Python（FastAPI + structlog、将来的にgRPC常駐プロセス化を予定）
+- **解析ワーカー**: Python（FastAPI + structlog + numpy、将来的にgRPC常駐プロセス化を予定）
 - **キャッシュ**: Redis
 - **DB/認証**: Supabase（PostgreSQL / Auth）。Go APIが `DATABASE_URL` で直接Postgresに接続する唯一の経路（[pgx](https://github.com/jackc/pgx)）。認証はSupabase AuthのJWT（JWKS/ES256）をGo APIが検証（[golang-jwt](https://github.com/golang-jwt/jwt) + [keyfunc](https://github.com/MicahParks/keyfunc)）
 - **フロントエンド**: Next.js 16（App Router）/ React 19 / TypeScript 5 / Tailwind CSS v4 / ESLint 9（`@/` エイリアス構成）。認証は [@supabase/ssr](https://github.com/supabase/ssr) でCookieベースのセッション管理（Server Actions + `proxy.ts`でのセッションリフレッシュ）
 - **コンテナ/開発基盤**: Docker Compose
 
-現状はバックエンド（SupabaseのPostgres接続・スキーマ・JWT認証・experiments CRUD）に加え、フロントエンドのログイン画面（メール/パスワード + Google OAuth）まで実装済みです。ホーム画面はログイン状態とGo APIの `/healthz` 疎通確認を表示します。解析機能（線形回帰など）、グラフ描画、experiments一覧・作成のUIは今後追加していきます。
+現状はバックエンド（SupabaseのPostgres接続・スキーマ・JWT認証・experiments CRUD・Python Workerでの線形回帰解析）に加え、フロントエンドのログイン画面（メール/パスワード + Google OAuth）まで実装済みです。ホーム画面はログイン状態とGo APIの `/healthz` 疎通確認を表示します。グラフ描画、experiments一覧・作成のUI、Go↔Worker間の解析連携（`POST /api/v1/experiments/{id}/analyze`）は今後追加していきます。
 
 ## 使用方法
 1. Docker と Docker Compose が利用できる環境を用意します。
@@ -55,6 +55,25 @@ curl -X POST "$SUPABASE_URL/auth/v1/signup" \
 - `POST /api/v1/experiments` — `{title, raw_data, config?}` を送信し実験を作成
 - `GET /api/v1/experiments/{id}` — 自分が作成した実験を取得（他人のIDや存在しないIDは404）
 - `PATCH /api/v1/experiments/{id}/config` — `{config}` でグラフ設定を丸ごと置き換え
+
+## Python Worker（解析）
+
+`POST /analyze`（`http://localhost:8001/analyze`）に実験データを送ると数値解析結果を返します。認証やDB永続化は行いません（Go APIが将来仲介する想定、PDR.md §6）。
+
+実験データは固定の`x`/`y`列ではなく**名前付きカラムの辞書**として表現し、エラーバーなど将来の系列追加にスキーマ変更なしで対応できるようにしています。
+
+```bash
+curl -X POST http://localhost:8001/analyze \
+  -H "Content-Type: application/json" \
+  -d '{
+    "type": "linear_regression",
+    "data": {"columns": {"x": [0,1,2,3,4], "y": [1,3,5,7,9]}}
+  }'
+```
+
+- `y_error`カラムを渡すと逆分散重み付き回帰になります（外れ値の影響を誤差の大きさに応じて弱める）
+- 未対応の`type`やカラム欠如・長さ不一致は`400`＋エンベロープ形式のエラーで返ります
+- 新しい解析タイプを追加する場合は `backend/worker/app/analysis/` に新規ファイルを作り `@register("タイプ名")` を付けるだけで良い構造（`app/analysis/linear_regression.py`参照）
 
 ## ログイン画面
 
