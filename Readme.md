@@ -7,10 +7,10 @@
 - **解析ワーカー**: Python（FastAPI + structlog + numpy、将来的にgRPC常駐プロセス化を予定）
 - **キャッシュ**: Redis
 - **DB/認証**: Supabase（PostgreSQL / Auth）。Go APIが `DATABASE_URL` で直接Postgresに接続する唯一の経路（[pgx](https://github.com/jackc/pgx)）。認証はSupabase AuthのJWT（JWKS/ES256）をGo APIが検証（[golang-jwt](https://github.com/golang-jwt/jwt) + [keyfunc](https://github.com/MicahParks/keyfunc)）
-- **フロントエンド**: Next.js 16（App Router）/ React 19 / TypeScript 5 / Tailwind CSS v4 / ESLint 9（`@/` エイリアス構成）。認証は [@supabase/ssr](https://github.com/supabase/ssr) でCookieベースのセッション管理（Server Actions + `proxy.ts`でのセッションリフレッシュ）。グラフ描画は [Plotly.js](https://plotly.com/javascript/)（PDR.md §6）
+- **フロントエンド**: Next.js 16（App Router）/ React 19 / TypeScript 5 / Tailwind CSS v4 / ESLint 9（`@/` エイリアス構成）。認証は [@supabase/ssr](https://github.com/supabase/ssr) でCookieベースのセッション管理（Server Actions + `proxy.ts`でのセッションリフレッシュ）。グラフ描画は [Plotly.js](https://plotly.com/javascript/)（PDR.md §6）。軸ラベルの数式表示は [KaTeX](https://katex.org/)
 - **コンテナ/開発基盤**: Docker Compose
 
-現状はバックエンド（SupabaseのPostgres接続・スキーマ・JWT認証・experiments CRUD・Python Workerでの線形回帰解析）に加え、フロントエンドのログイン画面と実験データ入力・グラフ表示まで実装済みです。ログイン後はトップページ（`/`）で直接データ貼り付け→ライブプレビュー→保存ができ、保存後は`/experiments/{id}`で確認できます。解析結果（回帰直線など）のグラフ重ね描画、experiments一覧UI、Go↔Worker間の解析連携（`POST /api/v1/experiments/{id}/analyze`）は今後追加していきます。
+現状はバックエンド（SupabaseのPostgres接続・スキーマ・JWT認証・experiments CRUD・Python Workerでの線形回帰解析）に加え、フロントエンドのログイン画面と実験データ入力・グラフ表示まで実装済みです。ログイン後はトップページ（`/`）で直接データ貼り付け→ライブプレビュー→保存ができ、保存後は`/experiments/{id}`で確認できます。軸ラベルは変数（斜体）・単位や日本語（立体）を断片単位で指定してKaTeX＋DOM合成で描画できます（PDR.md §6の`axis_label_runs`）。解析結果（回帰直線など）のグラフ重ね描画、experiments一覧UI、Go↔Worker間の解析連携（`POST /api/v1/experiments/{id}/analyze`）は今後追加していきます。
 
 ## 使用方法
 1. Docker と Docker Compose が利用できる環境を用意します。
@@ -63,10 +63,11 @@ curl -X POST "$SUPABASE_URL/auth/v1/signup" \
 - スプレッドシートからのコピー＆ペースト想定（タブ／カンマ／スペース区切りを自動判定）。1列目=`x`、2列目=`y`固定
 - 3列目以降は列ごとに役割を選択（`y_error` / `x_error` / 使わない / カスタム名）。Python Workerの`DataSeries.columns`と同じキー名で保存されるため、将来の解析連携にそのまま使える
 - **貼り付けた瞬間にクライアント側だけでPlotly.jsのグラフがライブ更新される**（保存前のプレビュー）。データが無い間・Plotly読み込み中はスケルトン（`components/ChartSkeleton.tsx`）を表示
-- 「保存してグラフを確定」を押すとGo APIに保存され、`/experiments/{id}` にリダイレクトして確定版のグラフを表示（`y_error`/`x_error`があればエラーバー付き）
+- 軸ラベルは断片（run）ごとに「斜体＝変数」「立体＝単位・日本語など」を指定でき（PDR.md §6の`axis_label_runs`）、ASCII文字の断片はKaTeXで数式として、日本語などの非ASCII文字はDOM（CSS）でそのまま重ねて表示する。作成フォームで設定した内容がグラフのプレビューにもそのまま反映される
+- 「保存してグラフを確定」を押すとGo APIに保存され、`/experiments/{id}` にリダイレクトして確定版のグラフを表示（`y_error`/`x_error`があればエラーバー付き、軸ラベルも保存した内容で表示）
 - トップページの入力フォーム・`/experiments/{id}`は未ログインだと`/login`にリダイレクトされる
 - 現状は生データのプロットのみで、回帰直線などの解析結果表示は未実装（Go側に`/analyze`中継エンドポイントを作った後に対応予定）
-- 保存済み実験（`/experiments/{id}`）のデータ自体の事後編集は未実装（Go側に`raw_data`更新エンドポイントが無いため）
+- 保存済み実験（`/experiments/{id}`）のデータ自体・軸ラベルの事後編集は未実装（作成時に設定した内容のみ。Go側にPATCH `/config`は既にあるが、フロントの編集UIをまだ`/experiments/{id}`に用意していない）
 
 ## Python Worker（解析）
 

@@ -1,6 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import { callGoApi, GoApiError } from "@/lib/api";
 import ExperimentChart from "@/components/ExperimentChart";
+import type { AxisLabelRun } from "@/components/AxisLabelRuns";
 
 export const dynamic = "force-dynamic";
 
@@ -11,6 +12,15 @@ type Experiment = {
   config: Record<string, unknown>;
   created_at: string;
 };
+
+function readAxisLabelRuns(config: Record<string, unknown>, key: string): AxisLabelRun[] {
+  const runs = config[key];
+  if (!Array.isArray(runs)) return [];
+  return runs.filter(
+    (r): r is AxisLabelRun =>
+      typeof r === "object" && r !== null && typeof r.text === "string" && typeof r.italic === "boolean",
+  );
+}
 
 export default async function ExperimentPage({
   params,
@@ -42,6 +52,8 @@ export default async function ExperimentPage({
         <ExperimentChart
           columns={experiment.raw_data.columns}
           title={experiment.title}
+          xAxisLabelRuns={readAxisLabelRuns(experiment.config, "x_axis_label_runs")}
+          yAxisLabelRuns={readAxisLabelRuns(experiment.config, "y_axis_label_runs")}
         />
       </main>
     </div>

@@ -8,6 +8,68 @@ import {
 } from "@/app/experiments/actions";
 import ExperimentChart from "./ExperimentChart";
 import ChartSkeleton from "./ChartSkeleton";
+import AxisLabelRuns, { type AxisLabelRun } from "./AxisLabelRuns";
+
+function AxisLabelRunsEditor({
+  label,
+  runs,
+  onChange,
+}: {
+  label: string;
+  runs: AxisLabelRun[];
+  onChange: (runs: AxisLabelRun[]) => void;
+}) {
+  const update = (i: number, patch: Partial<AxisLabelRun>) =>
+    onChange(runs.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+  const remove = (i: number) => onChange(runs.filter((_, idx) => idx !== i));
+  const add = () => onChange([...runs, { text: "", italic: true }]);
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+        {label}
+      </span>
+      {runs.map((run, i) => (
+        <div key={i} className="flex items-center gap-2">
+          <input
+            type="text"
+            value={run.text}
+            onChange={(e) => update(i, { text: e.target.value })}
+            placeholder="例: v, m/s, （速度）"
+            className="flex-1 rounded-md border border-zinc-300 bg-transparent px-2 py-1 text-sm dark:border-zinc-700"
+          />
+          <label className="flex items-center gap-1 text-xs text-zinc-600 dark:text-zinc-400">
+            <input
+              type="checkbox"
+              checked={run.italic}
+              onChange={(e) => update(i, { italic: e.target.checked })}
+            />
+            斜体（変数）
+          </label>
+          <button
+            type="button"
+            onClick={() => remove(i)}
+            className="text-xs text-red-600 dark:text-red-400"
+          >
+            削除
+          </button>
+        </div>
+      ))}
+      <button
+        type="button"
+        onClick={add}
+        className="self-start text-xs text-zinc-600 underline dark:text-zinc-400"
+      >
+        + 断片を追加
+      </button>
+      {runs.length > 0 && (
+        <div className="rounded-md border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-800">
+          プレビュー: <AxisLabelRuns runs={runs} />
+        </div>
+      )}
+    </div>
+  );
+}
 
 const ROLE_OPTIONS = [
   { value: "y_error", label: "y誤差 (y_error)" },
@@ -72,6 +134,8 @@ export default function ExperimentEditor() {
   const [pastedText, setPastedText] = useState("");
   const [extraRoles, setExtraRoles] = useState<Record<number, string>>({});
   const [customNames, setCustomNames] = useState<Record<number, string>>({});
+  const [xAxisRuns, setXAxisRuns] = useState<AxisLabelRun[]>([]);
+  const [yAxisRuns, setYAxisRuns] = useState<AxisLabelRun[]>([]);
 
   const parsed = useMemo(() => parsePastedText(pastedText), [pastedText]);
 
@@ -181,6 +245,16 @@ export default function ExperimentEditor() {
         )}
 
         {columns && (
+          <div className="flex flex-col gap-4 rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
+            <h2 className="text-sm font-medium text-zinc-500 dark:text-zinc-400">
+              軸ラベル（任意。断片ごとに斜体＝変数／立体＝単位・日本語などを指定）
+            </h2>
+            <AxisLabelRunsEditor label="X軸" runs={xAxisRuns} onChange={setXAxisRuns} />
+            <AxisLabelRunsEditor label="Y軸" runs={yAxisRuns} onChange={setYAxisRuns} />
+          </div>
+        )}
+
+        {columns && (
           <div className="flex flex-col gap-2">
             <h2 className="text-sm font-medium text-zinc-500 dark:text-zinc-400">
               プレビュー（{parsed.rows.length}行）
@@ -218,6 +292,8 @@ export default function ExperimentEditor() {
         )}
 
         <input type="hidden" name="columns" value={columns ? JSON.stringify(columns) : ""} />
+        <input type="hidden" name="xAxisLabelRuns" value={JSON.stringify(xAxisRuns)} />
+        <input type="hidden" name="yAxisLabelRuns" value={JSON.stringify(yAxisRuns)} />
 
         {state.error && (
           <p className="text-sm text-red-600 dark:text-red-400">{state.error}</p>
@@ -237,7 +313,12 @@ export default function ExperimentEditor() {
           プレビュー（未保存）
         </h2>
         {columns ? (
-          <ExperimentChart columns={columns} title={title || "(タイトル未入力)"} />
+          <ExperimentChart
+            columns={columns}
+            title={title || "(タイトル未入力)"}
+            xAxisLabelRuns={xAxisRuns}
+            yAxisLabelRuns={yAxisRuns}
+          />
         ) : (
           <ChartSkeleton />
         )}
