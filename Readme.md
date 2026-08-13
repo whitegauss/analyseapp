@@ -7,10 +7,10 @@
 - **解析ワーカー**: Python（FastAPI + structlog、将来的にgRPC常駐プロセス化を予定）
 - **キャッシュ**: Redis
 - **DB/認証**: Supabase（PostgreSQL / OAuth）※現時点では未接続（環境変数の枠のみ用意）
-- **フロントエンド**: Next.js（未着手）
+- **フロントエンド**: Next.js 16（App Router）/ React 19 / TypeScript 5 / Tailwind CSS v4 / ESLint 9（`@/` エイリアス構成）
 - **コンテナ/開発基盤**: Docker Compose
 
-現状はバックエンドの最小スケルトン（Go API・Python Worker・Redisの疎通確認まで）のみが実装されています。experiments CRUDや解析機能、Supabase/Redisの実接続、フロントエンドは今後追加していきます。
+現状はバックエンド・フロントエンドともに最小スケルトンのみが実装されています（フロントエンドはGo APIの `/healthz` をサーバーサイドで呼び出し疎通確認するだけのページ）。experiments CRUDや解析機能、Supabase/Redisの実接続、グラフ描画などの実機能は今後追加していきます。
 
 ## 使用方法
 1. Docker と Docker Compose が利用できる環境を用意します。
@@ -22,11 +22,13 @@
 ```bash
 docker compose up --build
 ```
+- フロントエンド: `http://localhost:3000`（Go APIへの接続確認ページ）
 - Go API: `http://localhost:8080`（ヘルスチェック: `GET /healthz`）
 - Python Worker: `http://localhost:8001`（ヘルスチェック: `GET /healthz`）
 - Redis: `localhost:6379`
 
 ### 個別サービスの再起動例
+- フロントエンドだけ: `docker compose restart frontend`
 - APIだけ: `docker compose restart api`
 - Workerだけ: `docker compose restart worker`
 
