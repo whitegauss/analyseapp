@@ -27,6 +27,17 @@ type Experiment struct {
 	UpdatedAt time.Time      `json:"updated_at"`
 }
 
+// Store is the persistence interface httpserver's handlers depend on.
+// *Repository is the real Postgres-backed implementation; tests can supply
+// a fake instead so handler logic (validation, status codes) is testable
+// without a database.
+type Store interface {
+	EnsureProfile(ctx context.Context, userID uuid.UUID) error
+	Create(ctx context.Context, userID uuid.UUID, title *string, rawData, config map[string]any) (Experiment, error)
+	GetByID(ctx context.Context, id, userID uuid.UUID) (Experiment, error)
+	UpdateConfig(ctx context.Context, id, userID uuid.UUID, config map[string]any) (Experiment, error)
+}
+
 type Repository struct {
 	pool *pgxpool.Pool
 }

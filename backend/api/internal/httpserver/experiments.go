@@ -22,7 +22,7 @@ type updateConfigRequest struct {
 	Config map[string]any `json:"config"`
 }
 
-func handleCreateExperiment(repo *experiments.Repository) http.HandlerFunc {
+func handleCreateExperiment(repo experiments.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID, ok := auth.UserID(r.Context())
 		if !ok {
@@ -58,7 +58,7 @@ func handleCreateExperiment(repo *experiments.Repository) http.HandlerFunc {
 	}
 }
 
-func handleGetExperiment(repo *experiments.Repository) http.HandlerFunc {
+func handleGetExperiment(repo experiments.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID, ok := auth.UserID(r.Context())
 		if !ok {
@@ -86,7 +86,7 @@ func handleGetExperiment(repo *experiments.Repository) http.HandlerFunc {
 	}
 }
 
-func handleUpdateExperimentConfig(repo *experiments.Repository) http.HandlerFunc {
+func handleUpdateExperimentConfig(repo experiments.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID, ok := auth.UserID(r.Context())
 		if !ok {

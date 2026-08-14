@@ -8,7 +8,7 @@ import katex from "katex";
 // upright, since KaTeX has no CJK font.
 const MATH_SEGMENT = /\$([^$]+)\$/g;
 
-function parseSegments(label: string): { math: boolean; content: string }[] {
+export function parseSegments(label: string): { math: boolean; content: string }[] {
   const segments: { math: boolean; content: string }[] = [];
   let lastIndex = 0;
   for (const match of label.matchAll(MATH_SEGMENT)) {

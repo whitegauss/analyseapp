@@ -25,6 +25,13 @@ func UserID(ctx context.Context) (uuid.UUID, bool) {
 	return v, ok
 }
 
+// WithUserID returns a context carrying userID, as if it had been set by
+// Middleware. Exposed for handler tests that want to skip real JWT
+// verification.
+func WithUserID(ctx context.Context, userID uuid.UUID) context.Context {
+	return context.WithValue(ctx, userIDKey, userID)
+}
+
 // NewJWKS fetches and keeps in sync the Supabase project's JSON Web Key Set,
 // used to verify the asymmetric (ES256) JWTs Supabase Auth issues by
 // default. Call once at startup; the returned Keyfunc auto-refreshes keys.

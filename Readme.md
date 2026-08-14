@@ -1,5 +1,7 @@
 # AnalyseApp
 
+![CI](https://github.com/whitegauss/analyseapp/actions/workflows/ci.yml/badge.svg)
+
 実験データの解析（グラフ化・回帰分析など）を簡単に行うためのWebアプリ。設計の詳細は [PDR.md](./PDR.md) を参照。
 
 ## 技術スタック
@@ -40,6 +42,14 @@ docker compose up --build
 ```bash
 docker compose down
 ```
+
+## テスト / CI
+
+`main`へのpush・PRで [.github/workflows/ci.yml](./.github/workflows/ci.yml) がフロントエンド/Go API/Python Workerを並列でlint・テスト・ビルドします。
+
+- フロントエンド: `cd frontend && npm install && npm run lint && npm run test && npx next build`（テストは[Vitest](https://vitest.dev/)。`lib/pasteDataParsing.ts`の貼り付けデータパース、`components/AxisLabel.tsx`の`$...$`区切りロジックなど、純粋関数のみを対象にしています）
+- Go API: `cd backend/api && go build ./... && go vet ./... && go test ./...`（`internal/response`のエンベロープ整形、`internal/httpserver`のハンドラー検証ロジックをfake store（`experiments.Store`インターフェース）でテスト。DBを要する`experiments.Repository`のSQL自体は今回未カバー）
+- Python Worker: `cd backend/worker && pip install -r requirements-dev.txt && pytest`（`tests/test_linear_regression.py`が解析ロジック、`tests/test_main.py`がHTTP層・エラーエンベロープをカバー）
 
 ## API（experiments）
 
