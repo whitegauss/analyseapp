@@ -35,7 +35,11 @@ export function parsePastedText(text: string): ParsedTable {
     }
     for (const cell of row) {
       if (cell === "" || Number.isNaN(Number(cell))) {
-        return { rows, columnCount, error: `数値として読めない値があります: "${cell}"` };
+        return {
+          rows,
+          columnCount,
+          error: `数値として読めない値があります: "${cell}"`,
+        };
       }
     }
   }

@@ -38,7 +38,10 @@ export async function signUpWithPassword(
   // If email confirmation is required, Supabase returns a user but no
   // session; there's nothing to log in with yet.
   if (!data.session) {
-    return { message: "確認メールを送信しました。メール内のリンクから登録を完了してください。" };
+    return {
+      message:
+        "確認メールを送信しました。メール内のリンクから登録を完了してください。",
+    };
   }
 
   redirect("/");

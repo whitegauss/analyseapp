@@ -84,7 +84,11 @@ describe("buildColumns", () => {
 
   it("uses the trimmed custom name for __custom__ role columns", () => {
     const parsed = parsePastedText("0\t1\t9\n1\t3\t8");
-    const columns = buildColumns(parsed, { 2: "__custom__" }, { 2: "  weight " });
+    const columns = buildColumns(
+      parsed,
+      { 2: "__custom__" },
+      { 2: "  weight " },
+    );
     expect(columns).toEqual({
       x: [0, 1],
       y: [1, 3],

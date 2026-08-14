@@ -20,6 +20,7 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
       - run: npm run lint
+      - run: npm run format:check
       - run: npm run test
       - run: npx next build
 
@@ -37,6 +38,11 @@ jobs:
       - run: go build ./...
       - run: go vet ./...
       - run: go test ./...
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          working-directory: backend/api
+      - run: golangci-lint fmt --diff ./...
 
   worker:
     runs-on: ubuntu-latest
@@ -51,4 +57,6 @@ jobs:
           cache: pip
           cache-dependency-path: backend/worker/requirements-dev.txt
       - run: pip install -r requirements-dev.txt
+      - run: ruff check .
+      - run: ruff format --check .
       - run: pytest

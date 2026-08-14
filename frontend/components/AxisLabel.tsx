@@ -8,12 +8,17 @@ import katex from "katex";
 // upright, since KaTeX has no CJK font.
 const MATH_SEGMENT = /\$([^$]+)\$/g;
 
-export function parseSegments(label: string): { math: boolean; content: string }[] {
+export function parseSegments(
+  label: string,
+): { math: boolean; content: string }[] {
   const segments: { math: boolean; content: string }[] = [];
   let lastIndex = 0;
   for (const match of label.matchAll(MATH_SEGMENT)) {
     if (match.index > lastIndex) {
-      segments.push({ math: false, content: label.slice(lastIndex, match.index) });
+      segments.push({
+        math: false,
+        content: label.slice(lastIndex, match.index),
+      });
     }
     segments.push({ math: true, content: match[1] });
     lastIndex = match.index + match[0].length;
@@ -38,7 +43,11 @@ type Props = {
   className?: string;
 };
 
-export default function AxisLabel({ label, vertical = false, className = "" }: Props) {
+export default function AxisLabel({
+  label,
+  vertical = false,
+  className = "",
+}: Props) {
   if (!label.trim()) return null;
 
   return (
@@ -49,7 +58,10 @@ export default function AxisLabel({ label, vertical = false, className = "" }: P
     >
       {parseSegments(label).map((seg, i) =>
         seg.math ? (
-          <span key={i} dangerouslySetInnerHTML={{ __html: katexHtml(seg.content) }} />
+          <span
+            key={i}
+            dangerouslySetInnerHTML={{ __html: katexHtml(seg.content) }}
+          />
         ) : (
           <span key={i}>{seg.content}</span>
         ),

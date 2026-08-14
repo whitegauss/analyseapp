@@ -64,7 +64,9 @@ export default function ExperimentEditor() {
         </label>
 
         {parsed.error && (
-          <p className="text-sm text-red-600 dark:text-red-400">{parsed.error}</p>
+          <p className="text-sm text-red-600 dark:text-red-400">
+            {parsed.error}
+          </p>
         )}
 
         {extraColumnIndexes.length > 0 && !parsed.error && (
@@ -86,16 +88,30 @@ export default function ExperimentEditor() {
             軸ラベル
             <InfoTooltip text="任意入力です。$...$で囲んだ部分だけTeXの数式として斜体表示、それ以外は日本語も含めそのまま立体表示されます（例: 速度 $v$ (m/s)）" />
           </h2>
-          <AxisLabelInput label="X軸" value={xAxisLabel} onChange={setXAxisLabel} />
-          <AxisLabelInput label="Y軸" value={yAxisLabel} onChange={setYAxisLabel} />
+          <AxisLabelInput
+            label="X軸"
+            value={xAxisLabel}
+            onChange={setXAxisLabel}
+          />
+          <AxisLabelInput
+            label="Y軸"
+            value={yAxisLabel}
+            onChange={setYAxisLabel}
+          />
         </div>
 
-        <input type="hidden" name="columns" value={columns ? JSON.stringify(columns) : ""} />
+        <input
+          type="hidden"
+          name="columns"
+          value={columns ? JSON.stringify(columns) : ""}
+        />
         <input type="hidden" name="xAxisLabel" value={xAxisLabel} />
         <input type="hidden" name="yAxisLabel" value={yAxisLabel} />
 
         {state.error && (
-          <p className="text-sm text-red-600 dark:text-red-400">{state.error}</p>
+          <p className="text-sm text-red-600 dark:text-red-400">
+            {state.error}
+          </p>
         )}
 
         <button

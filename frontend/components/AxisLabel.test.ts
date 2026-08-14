@@ -27,7 +27,9 @@ describe("parseSegments", () => {
   });
 
   it("treats an unclosed $ as plain text", () => {
-    expect(parseSegments("cost: $5")).toEqual([{ math: false, content: "cost: $5" }]);
+    expect(parseSegments("cost: $5")).toEqual([
+      { math: false, content: "cost: $5" },
+    ]);
   });
 
   it("returns no segments for an empty string", () => {

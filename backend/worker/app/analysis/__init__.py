@@ -4,7 +4,8 @@ new file here and registering it with @register("name") -- nothing else
 needs to change.
 """
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from app.schemas import DataSeries
 

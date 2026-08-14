@@ -43,13 +43,21 @@ docker compose up --build
 docker compose down
 ```
 
-## テスト / CI
+## テスト / Lint / CI
 
-`main`へのpush・PRで [.github/workflows/ci.yml](./.github/workflows/ci.yml) がフロントエンド/Go API/Python Workerを並列でlint・テスト・ビルドします。
+`main`へのpush・PRで [.github/workflows/ci.yml](./.github/workflows/ci.yml) がフロントエンド/Go API/Python Workerを並列でlint・フォーマットチェック・テスト・ビルドします。
 
-- フロントエンド: `cd frontend && npm install && npm run lint && npm run test && npx next build`（テストは[Vitest](https://vitest.dev/)。`lib/pasteDataParsing.ts`の貼り付けデータパース、`components/AxisLabel.tsx`の`$...$`区切りロジックなど、純粋関数のみを対象にしています）
-- Go API: `cd backend/api && go build ./... && go vet ./... && go test ./...`（`internal/response`のエンベロープ整形、`internal/httpserver`のハンドラー検証ロジックをfake store（`experiments.Store`インターフェース）でテスト。DBを要する`experiments.Repository`のSQL自体は今回未カバー）
-- Python Worker: `cd backend/worker && pip install -r requirements-dev.txt && pytest`（`tests/test_linear_regression.py`が解析ロジック、`tests/test_main.py`がHTTP層・エラーエンベロープをカバー）
+- フロントエンド: `cd frontend && npm install`
+  - テスト: `npm run test`（[Vitest](https://vitest.dev/)。`lib/pasteDataParsing.ts`の貼り付けデータパース、`components/AxisLabel.tsx`の`$...$`区切りロジックなど、純粋関数のみを対象）
+  - Lint: `npm run lint`（ESLint / `eslint-config-next`）
+  - フォーマット: `npm run format`で整形、`npm run format:check`でCIと同じチェックのみ（[Prettier](https://prettier.io/)、`.prettierrc.json`）
+  - ビルド: `npx next build`
+- Go API: `cd backend/api`
+  - テスト: `go build ./... && go vet ./... && go test ./...`（`internal/response`のエンベロープ整形、`internal/httpserver`のハンドラー検証ロジックをfake store（`experiments.Store`インターフェース）でテスト。DBを要する`experiments.Repository`のSQL自体は今回未カバー）
+  - Lint/フォーマット: [golangci-lint](https://golangci-lint.run/)（`.golangci.yml`）。`golangci-lint run ./...`でlint、`golangci-lint fmt ./...`でフォーマット（`--diff`で差分確認のみ）
+- Python Worker: `cd backend/worker && pip install -r requirements-dev.txt`
+  - テスト: `pytest`（`tests/test_linear_regression.py`が解析ロジック、`tests/test_main.py`がHTTP層・エラーエンベロープをカバー）
+  - Lint/フォーマット: [Ruff](https://docs.astral.sh/ruff/)（`ruff.toml`）。`ruff check .`でlint、`ruff format .`でフォーマット（`--check`で差分確認のみ）
 
 ## API（experiments）
 

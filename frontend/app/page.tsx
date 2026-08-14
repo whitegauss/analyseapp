@@ -6,8 +6,7 @@ import ExperimentEditor from "@/components/ExperimentEditor";
 export const dynamic = "force-dynamic";
 
 type HealthResult =
-  | { ok: true; status: number; body: string }
-  | { ok: false; error: string };
+  { ok: true; status: number; body: string } | { ok: false; error: string };
 
 async function checkApiHealth(): Promise<HealthResult> {
   const apiBaseUrl = process.env.API_INTERNAL_URL ?? "http://localhost:8080";
