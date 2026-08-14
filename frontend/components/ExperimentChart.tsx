@@ -20,6 +20,18 @@ type Props = {
   yAxisLabel?: string;
 };
 
+function axisLayout(label: string, fallbackTitle: string) {
+  return {
+    title: { text: label.trim() ? "" : fallbackTitle },
+    showgrid: false,
+    zeroline: false,
+    showline: true,
+    mirror: true,
+    ticks: "inside" as const,
+    minor: { ticks: "inside" as const, showgrid: false },
+  };
+}
+
 export default function ExperimentChart({
   columns,
   title,
@@ -52,24 +64,8 @@ export default function ExperimentChart({
             data={[trace]}
             layout={{
               title: { text: title },
-              xaxis: {
-                title: { text: xAxisLabel.trim() ? "" : "x" },
-                showgrid: false,
-                zeroline: false,
-                showline: true,
-                mirror: true,
-                ticks: "inside",
-                minor: { ticks: "inside", showgrid: false },
-              },
-              yaxis: {
-                title: { text: yAxisLabel.trim() ? "" : "y" },
-                showgrid: false,
-                zeroline: false,
-                showline: true,
-                mirror: true,
-                ticks: "inside",
-                minor: { ticks: "inside", showgrid: false },
-              },
+              xaxis: axisLayout(xAxisLabel, "x"),
+              yaxis: axisLayout(yAxisLabel, "y"),
               autosize: true,
               margin: { t: 48, r: 24, b: 48, l: 56 },
             }}
