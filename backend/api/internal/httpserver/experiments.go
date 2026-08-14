@@ -13,7 +13,7 @@ import (
 )
 
 type createExperimentRequest struct {
-	Title   string         `json:"title"`
+	Title   *string        `json:"title"`
 	RawData map[string]any `json:"raw_data"`
 	Config  map[string]any `json:"config"`
 }
@@ -35,9 +35,8 @@ func handleCreateExperiment(repo *experiments.Repository) http.HandlerFunc {
 			response.WriteError(w, http.StatusBadRequest, "invalid_body", "could not parse JSON body")
 			return
 		}
-		if req.Title == "" {
-			response.WriteError(w, http.StatusBadRequest, "invalid_title", "title is required")
-			return
+		if req.Title != nil && *req.Title == "" {
+			req.Title = nil
 		}
 		if req.RawData == nil {
 			response.WriteError(w, http.StatusBadRequest, "invalid_raw_data", "raw_data is required")

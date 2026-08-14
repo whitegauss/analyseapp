@@ -8,66 +8,40 @@ import {
 } from "@/app/experiments/actions";
 import ExperimentChart from "./ExperimentChart";
 import ChartSkeleton from "./ChartSkeleton";
-import AxisLabelRuns, { type AxisLabelRun } from "./AxisLabelRuns";
 
-function AxisLabelRunsEditor({
+function AxisLabelInput({
   label,
-  runs,
+  value,
   onChange,
 }: {
   label: string;
-  runs: AxisLabelRun[];
-  onChange: (runs: AxisLabelRun[]) => void;
+  value: string;
+  onChange: (value: string) => void;
 }) {
-  const update = (i: number, patch: Partial<AxisLabelRun>) =>
-    onChange(runs.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
-  const remove = (i: number) => onChange(runs.filter((_, idx) => idx !== i));
-  const add = () => onChange([...runs, { text: "", italic: true }]);
-
   return (
-    <div className="flex flex-col gap-1.5">
-      <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-        {label}
+    <label className="flex flex-col gap-1.5 text-sm text-zinc-700 dark:text-zinc-300">
+      {label}
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="例: 速度 $v$ (m/s)"
+        className="rounded-md border border-zinc-300 bg-transparent px-2 py-1.5 text-sm dark:border-zinc-700"
+      />
+    </label>
+  );
+}
+
+function InfoTooltip({ text }: { text: string }) {
+  return (
+    <span className="group relative inline-flex cursor-help items-center">
+      <span className="flex h-4 w-4 items-center justify-center rounded-full border border-zinc-400 text-[10px] leading-none text-zinc-500 dark:border-zinc-600 dark:text-zinc-400">
+        i
       </span>
-      {runs.map((run, i) => (
-        <div key={i} className="flex items-center gap-2">
-          <input
-            type="text"
-            value={run.text}
-            onChange={(e) => update(i, { text: e.target.value })}
-            placeholder="例: v, m/s, （速度）"
-            className="flex-1 rounded-md border border-zinc-300 bg-transparent px-2 py-1 text-sm dark:border-zinc-700"
-          />
-          <label className="flex items-center gap-1 text-xs text-zinc-600 dark:text-zinc-400">
-            <input
-              type="checkbox"
-              checked={run.italic}
-              onChange={(e) => update(i, { italic: e.target.checked })}
-            />
-            斜体（変数）
-          </label>
-          <button
-            type="button"
-            onClick={() => remove(i)}
-            className="text-xs text-red-600 dark:text-red-400"
-          >
-            削除
-          </button>
-        </div>
-      ))}
-      <button
-        type="button"
-        onClick={add}
-        className="self-start text-xs text-zinc-600 underline dark:text-zinc-400"
-      >
-        + 断片を追加
-      </button>
-      {runs.length > 0 && (
-        <div className="rounded-md border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-800">
-          プレビュー: <AxisLabelRuns runs={runs} />
-        </div>
-      )}
-    </div>
+      <span className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1 w-64 -translate-x-1/2 rounded-md border border-zinc-200 bg-white p-2 text-xs font-normal text-zinc-700 opacity-0 shadow-lg transition-opacity group-hover:opacity-100 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">
+        {text}
+      </span>
+    </span>
   );
 }
 
@@ -134,8 +108,8 @@ export default function ExperimentEditor() {
   const [pastedText, setPastedText] = useState("");
   const [extraRoles, setExtraRoles] = useState<Record<number, string>>({});
   const [customNames, setCustomNames] = useState<Record<number, string>>({});
-  const [xAxisRuns, setXAxisRuns] = useState<AxisLabelRun[]>([]);
-  const [yAxisRuns, setYAxisRuns] = useState<AxisLabelRun[]>([]);
+  const [xAxisLabel, setXAxisLabel] = useState("");
+  const [yAxisLabel, setYAxisLabel] = useState("");
 
   const parsed = useMemo(() => parsePastedText(pastedText), [pastedText]);
 
@@ -179,11 +153,10 @@ export default function ExperimentEditor() {
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
       <form action={formAction} className="flex flex-col gap-4">
         <label className="flex flex-col gap-1 text-sm text-zinc-700 dark:text-zinc-300">
-          タイトル
+          タイトル（任意）
           <input
             type="text"
             name="title"
-            required
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             className="rounded-md border border-zinc-300 bg-transparent px-3 py-2 text-sm dark:border-zinc-700"
@@ -244,56 +217,18 @@ export default function ExperimentEditor() {
           </div>
         )}
 
-        {columns && (
-          <div className="flex flex-col gap-4 rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
-            <h2 className="text-sm font-medium text-zinc-500 dark:text-zinc-400">
-              軸ラベル（任意。断片ごとに斜体＝変数／立体＝単位・日本語などを指定）
-            </h2>
-            <AxisLabelRunsEditor label="X軸" runs={xAxisRuns} onChange={setXAxisRuns} />
-            <AxisLabelRunsEditor label="Y軸" runs={yAxisRuns} onChange={setYAxisRuns} />
-          </div>
-        )}
-
-        {columns && (
-          <div className="flex flex-col gap-2">
-            <h2 className="text-sm font-medium text-zinc-500 dark:text-zinc-400">
-              プレビュー（{parsed.rows.length}行）
-            </h2>
-            <div className="overflow-x-auto rounded-md border border-zinc-200 dark:border-zinc-800">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-zinc-200 dark:border-zinc-800">
-                    {Object.keys(columns).map((key) => (
-                      <th key={key} className="px-3 py-1.5 text-left font-medium">
-                        {key}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {columns.x.slice(0, 5).map((_, i) => (
-                    <tr key={i}>
-                      {Object.keys(columns).map((key) => (
-                        <td key={key} className="px-3 py-1">
-                          {columns[key][i]}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {columns.x.length > 5 && (
-                <p className="px-3 py-1 text-xs text-zinc-400">
-                  他 {columns.x.length - 5} 行...
-                </p>
-              )}
-            </div>
-          </div>
-        )}
+        <div className="flex flex-col gap-4 rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
+          <h2 className="flex items-center gap-1.5 text-sm font-medium text-zinc-500 dark:text-zinc-400">
+            軸ラベル
+            <InfoTooltip text="任意入力です。$...$で囲んだ部分だけTeXの数式として斜体表示、それ以外は日本語も含めそのまま立体表示されます（例: 速度 $v$ (m/s)）" />
+          </h2>
+          <AxisLabelInput label="X軸" value={xAxisLabel} onChange={setXAxisLabel} />
+          <AxisLabelInput label="Y軸" value={yAxisLabel} onChange={setYAxisLabel} />
+        </div>
 
         <input type="hidden" name="columns" value={columns ? JSON.stringify(columns) : ""} />
-        <input type="hidden" name="xAxisLabelRuns" value={JSON.stringify(xAxisRuns)} />
-        <input type="hidden" name="yAxisLabelRuns" value={JSON.stringify(yAxisRuns)} />
+        <input type="hidden" name="xAxisLabel" value={xAxisLabel} />
+        <input type="hidden" name="yAxisLabel" value={yAxisLabel} />
 
         {state.error && (
           <p className="text-sm text-red-600 dark:text-red-400">{state.error}</p>
@@ -316,8 +251,8 @@ export default function ExperimentEditor() {
           <ExperimentChart
             columns={columns}
             title={title || "(タイトル未入力)"}
-            xAxisLabelRuns={xAxisRuns}
-            yAxisLabelRuns={yAxisRuns}
+            xAxisLabel={xAxisLabel}
+            yAxisLabel={yAxisLabel}
           />
         ) : (
           <ChartSkeleton />

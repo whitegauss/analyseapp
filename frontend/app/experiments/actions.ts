@@ -6,31 +6,14 @@ import { callGoApi, GoApiError } from "@/lib/api";
 export type CreateExperimentState = { error?: string };
 
 type Experiment = { id: string };
-type AxisLabelRun = { text: string; italic: boolean };
-
-function parseAxisLabelRuns(formData: FormData, field: string): AxisLabelRun[] {
-  try {
-    const runs = JSON.parse(String(formData.get(field) ?? "[]"));
-    if (!Array.isArray(runs)) return [];
-    return runs.filter(
-      (r): r is AxisLabelRun =>
-        typeof r === "object" && r !== null && typeof r.text === "string" && r.text.trim() !== "",
-    );
-  } catch {
-    return [];
-  }
-}
 
 export async function createExperiment(
   _prevState: CreateExperimentState,
   formData: FormData,
 ): Promise<CreateExperimentState> {
-  const title = String(formData.get("title") ?? "").trim();
+  const titleInput = String(formData.get("title") ?? "").trim();
+  const title = titleInput === "" ? null : titleInput;
   const columnsJson = String(formData.get("columns") ?? "");
-
-  if (!title) {
-    return { error: "タイトルを入力してください" };
-  }
 
   let columns: Record<string, number[]>;
   try {
@@ -43,8 +26,8 @@ export async function createExperiment(
   }
 
   const config = {
-    x_axis_label_runs: parseAxisLabelRuns(formData, "xAxisLabelRuns"),
-    y_axis_label_runs: parseAxisLabelRuns(formData, "yAxisLabelRuns"),
+    x_axis_label: String(formData.get("xAxisLabel") ?? "").trim(),
+    y_axis_label: String(formData.get("yAxisLabel") ?? "").trim(),
   };
 
   let experiment: Experiment | null;

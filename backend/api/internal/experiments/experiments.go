@@ -20,7 +20,7 @@ var ErrNotFound = errors.New("experiment not found")
 type Experiment struct {
 	ID        uuid.UUID      `json:"id"`
 	UserID    uuid.UUID      `json:"user_id"`
-	Title     string         `json:"title"`
+	Title     *string        `json:"title"`
 	RawData   map[string]any `json:"raw_data"`
 	Config    map[string]any `json:"config"`
 	CreatedAt time.Time      `json:"created_at"`
@@ -46,7 +46,7 @@ func (r *Repository) EnsureProfile(ctx context.Context, userID uuid.UUID) error 
 	return err
 }
 
-func (r *Repository) Create(ctx context.Context, userID uuid.UUID, title string, rawData, config map[string]any) (Experiment, error) {
+func (r *Repository) Create(ctx context.Context, userID uuid.UUID, title *string, rawData, config map[string]any) (Experiment, error) {
 	if config == nil {
 		config = map[string]any{}
 	}

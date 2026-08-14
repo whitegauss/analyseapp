@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic";
 import type { Data } from "plotly.js";
 import ChartSkeleton from "./ChartSkeleton";
-import AxisLabelRuns, { type AxisLabelRun } from "./AxisLabelRuns";
+import AxisLabel from "./AxisLabel";
 
 // plotly.js touches `window`, so it can only load in the browser. While the
 // library itself is being fetched, show the same skeleton used for "no data
@@ -16,15 +16,15 @@ const Plot = dynamic(() => import("react-plotly.js"), {
 type Props = {
   columns: Record<string, number[]>;
   title: string;
-  xAxisLabelRuns?: AxisLabelRun[];
-  yAxisLabelRuns?: AxisLabelRun[];
+  xAxisLabel?: string;
+  yAxisLabel?: string;
 };
 
 export default function ExperimentChart({
   columns,
   title,
-  xAxisLabelRuns = [],
-  yAxisLabelRuns = [],
+  xAxisLabel = "",
+  yAxisLabel = "",
 }: Props) {
   const { x, y, ...rest } = columns;
 
@@ -46,25 +46,25 @@ export default function ExperimentChart({
   return (
     <div className="flex flex-col items-center gap-1">
       <div className="flex w-full items-center gap-2">
-        {yAxisLabelRuns.length > 0 && (
-          <AxisLabelRuns runs={yAxisLabelRuns} vertical />
-        )}
+        {yAxisLabel.trim() && <AxisLabel label={yAxisLabel} vertical />}
         <div className="min-w-0 flex-1">
           <Plot
             data={[trace]}
             layout={{
               title: { text: title },
               xaxis: {
-                title: { text: xAxisLabelRuns.length > 0 ? "" : "x" },
+                title: { text: xAxisLabel.trim() ? "" : "x" },
                 showgrid: false,
+                zeroline: false,
                 showline: true,
                 mirror: true,
                 ticks: "inside",
                 minor: { ticks: "inside", showgrid: false },
               },
               yaxis: {
-                title: { text: yAxisLabelRuns.length > 0 ? "" : "y" },
+                title: { text: yAxisLabel.trim() ? "" : "y" },
                 showgrid: false,
+                zeroline: false,
                 showline: true,
                 mirror: true,
                 ticks: "inside",
@@ -79,7 +79,7 @@ export default function ExperimentChart({
           />
         </div>
       </div>
-      {xAxisLabelRuns.length > 0 && <AxisLabelRuns runs={xAxisLabelRuns} />}
+      {xAxisLabel.trim() && <AxisLabel label={xAxisLabel} />}
     </div>
   );
 }

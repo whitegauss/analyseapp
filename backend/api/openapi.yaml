@@ -1,0 +1,341 @@
+openapi: 3.0.3
+info:
+  title: AnalyseApp API Gateway
+  version: "1.0.0"
+  description: |
+    Go API Gateway/BFF for AnalyseApp (see PDR.md). This is the sole HTTP
+    surface exposed to clients (browser frontend, and in the future
+    GAS/VBA/OfficeScript) — it is also the only component that talks to
+    Postgres (Supabase) directly. The Python analysis worker sits behind
+    this gateway and is not reachable by clients directly.
+
+    Every response (success or error) is wrapped in the same envelope:
+    `{data, error, meta}`.
+servers:
+  - url: http://localhost:8080
+    description: Local (docker compose)
+
+tags:
+  - name: health
+    description: Liveness/readiness probes (no auth)
+  - name: experiments
+    description: Experiment CRUD (Supabase JWT required)
+
+paths:
+  /healthz:
+    get:
+      tags: [health]
+      summary: Liveness check
+      description: Never touches dependencies (DB, Redis, Worker). Always 200 once the process is up.
+      responses:
+        "200":
+          description: Process is running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Envelope"
+              example:
+                data: { status: ok }
+                error: null
+                meta: {}
+
+  /readyz:
+    get:
+      tags: [health]
+      summary: Readiness check
+      description: Pings Postgres on every call. Reports not-ready (503) if `DATABASE_URL` isn't configured or the DB is unreachable.
+      responses:
+        "200":
+          description: Ready to serve DB-backed requests
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Envelope"
+              example:
+                data: { status: ok }
+                error: null
+                meta: {}
+        "503":
+          description: Not ready (DB not configured or unreachable)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Envelope"
+              examples:
+                db_not_configured:
+                  value:
+                    data: null
+                    error: { code: db_not_configured, message: "DATABASE_URL is not set" }
+                    meta: {}
+                db_unreachable:
+                  value:
+                    data: null
+                    error: { code: db_unreachable, message: "..." }
+                    meta: {}
+
+  /api/v1/experiments:
+    post:
+      tags: [experiments]
+      summary: Create an experiment
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateExperimentRequest"
+            example:
+              title: "落下運動の測定"
+              raw_data:
+                columns:
+                  x: [0, 1, 2, 3, 4]
+                  y: [1, 3, 5, 7, 9]
+                  y_error: [0.1, 0.1, 0.2, 0.1, 0.15]
+              config:
+                x_axis_label: "時刻 $t$ (s)"
+                y_axis_label: "速度 $v$ (m/s)"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Experiment"
+        "400":
+          description: Malformed body, or `raw_data` missing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Envelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/experiments/{id}:
+    get:
+      tags: [experiments]
+      summary: Get an experiment by id
+      description: Only returns experiments owned by the authenticated user. Another user's id (or a nonexistent id) is indistinguishable and returns 404.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ExperimentId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Experiment"
+        "400":
+          description: "`id` is not a valid UUID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Envelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/experiments/{id}/config:
+    patch:
+      tags: [experiments]
+      summary: Replace an experiment's config
+      description: "`config` is replaced wholesale (not merged). Used for graph settings such as `x_axis_label`/`y_axis_label`."
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ExperimentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateConfigRequest"
+            example:
+              config:
+                x_axis_label: "時刻 $t$ (s)"
+                y_axis_label: "速度 $v$ (m/s)"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Experiment"
+        "400":
+          description: Malformed body, `config` missing, or `id` is not a valid UUID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Envelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Supabase Auth JWT (`access_token`), verified against the Supabase
+        project's JWKS (ES256). Must carry `role: authenticated`.
+
+  parameters:
+    ExperimentId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    Unauthorized:
+      description: Missing/invalid bearer token
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Envelope"
+          example:
+            data: null
+            error: { code: unauthorized, message: "missing bearer token" }
+            meta: {}
+    NotFound:
+      description: Experiment not found (or not owned by the caller)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Envelope"
+          example:
+            data: null
+            error: { code: not_found, message: "experiment not found" }
+            meta: {}
+    InternalError:
+      description: Unexpected server error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Envelope"
+
+  schemas:
+    Envelope:
+      type: object
+      required: [data, error, meta]
+      properties:
+        data:
+          nullable: true
+        error:
+          nullable: true
+          $ref: "#/components/schemas/APIError"
+        meta:
+          type: object
+
+    APIError:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          example: not_found
+        message:
+          type: string
+          example: experiment not found
+
+    DataSeries:
+      type: object
+      description: |
+        Extensible "named columns" data model (shared with the Python
+        worker): not fixed to x/y/error fields, so error bars
+        (`y_error`/`x_error`) or future custom series need no schema change.
+      required: [columns]
+      properties:
+        columns:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: number
+          example:
+            x: [0, 1, 2]
+            y: [1, 3, 5]
+            y_error: [0.1, 0.1, 0.2]
+
+    ExperimentConfig:
+      type: object
+      description: |
+        Free-form graph settings. Currently used keys: `x_axis_label` /
+        `y_axis_label` (string; `$...$`-delimited segments render as KaTeX
+        math, everything else as plain text).
+      additionalProperties: true
+      example:
+        x_axis_label: "時刻 $t$ (s)"
+        y_axis_label: "速度 $v$ (m/s)"
+
+    Experiment:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        title:
+          type: string
+          nullable: true
+          description: Optional. Omitted/empty is stored as `null`.
+        raw_data:
+          $ref: "#/components/schemas/DataSeries"
+        config:
+          $ref: "#/components/schemas/ExperimentConfig"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateExperimentRequest:
+      type: object
+      required: [raw_data]
+      properties:
+        title:
+          type: string
+          nullable: true
+        raw_data:
+          $ref: "#/components/schemas/DataSeries"
+        config:
+          $ref: "#/components/schemas/ExperimentConfig"
+
+    UpdateConfigRequest:
+      type: object
+      required: [config]
+      properties:
+        config:
+          $ref: "#/components/schemas/ExperimentConfig"
