@@ -40,6 +40,7 @@ func NewRouter(dbPool *pgxpool.Pool, jwks keyfunc.Keyfunc, workerClient worker.C
 			if dbPool != nil {
 				repo := experiments.NewRepository(dbPool)
 				r.Post("/experiments", handleCreateExperiment(repo))
+				r.Get("/experiments", handleListExperiments(repo))
 				r.Get("/experiments/{id}", handleGetExperiment(repo))
 				r.Patch("/experiments/{id}/config", handleUpdateExperimentConfig(repo))
 				r.Post("/experiments/{id}/analyze", handleAnalyzeExperiment(repo, workerClient, resultCache))

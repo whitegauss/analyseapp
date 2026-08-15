@@ -25,6 +25,7 @@ type fakeStore struct {
 	t              *testing.T
 	createFn       func(ctx context.Context, userID uuid.UUID, title *string, rawData, config map[string]any) (experiments.Experiment, error)
 	getByIDFn      func(ctx context.Context, id, userID uuid.UUID) (experiments.Experiment, error)
+	listByUserFn   func(ctx context.Context, userID uuid.UUID) ([]experiments.Experiment, error)
 	updateConfigFn func(ctx context.Context, id, userID uuid.UUID, config map[string]any) (experiments.Experiment, error)
 }
 
@@ -44,6 +45,13 @@ func (f *fakeStore) GetByID(ctx context.Context, id, userID uuid.UUID) (experime
 		f.t.Fatal("unexpected call to GetByID")
 	}
 	return f.getByIDFn(ctx, id, userID)
+}
+
+func (f *fakeStore) ListByUser(ctx context.Context, userID uuid.UUID) ([]experiments.Experiment, error) {
+	if f.listByUserFn == nil {
+		f.t.Fatal("unexpected call to ListByUser")
+	}
+	return f.listByUserFn(ctx, userID)
 }
 
 func (f *fakeStore) UpdateConfig(ctx context.Context, id, userID uuid.UUID, config map[string]any) (experiments.Experiment, error) {
@@ -237,6 +245,72 @@ func TestHandleGetExperiment(t *testing.T) {
 
 		if rec.Code != http.StatusOK {
 			t.Errorf("status = %d, want 200 (body=%s)", rec.Code, rec.Body.String())
+		}
+	})
+}
+
+func TestHandleListExperiments(t *testing.T) {
+	t.Run("unauthenticated", func(t *testing.T) {
+		store := &fakeStore{t: t}
+		req := newTestRequest("GET", "", "", false)
+		rec := httptest.NewRecorder()
+
+		handleListExperiments(store)(rec, req)
+
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("status = %d, want 401", rec.Code)
+		}
+	})
+
+	t.Run("empty list", func(t *testing.T) {
+		store := &fakeStore{
+			t: t,
+			listByUserFn: func(ctx context.Context, userID uuid.UUID) ([]experiments.Experiment, error) {
+				return []experiments.Experiment{}, nil
+			},
+		}
+		req := newTestRequest("GET", "", "", true)
+		rec := httptest.NewRecorder()
+
+		handleListExperiments(store)(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("status = %d, want 200 (body=%s)", rec.Code, rec.Body.String())
+		}
+		body := decodeEnvelope(t, rec)
+		list, ok := body.Data.([]any)
+		if !ok || len(list) != 0 {
+			t.Errorf("data = %+v, want an empty array", body.Data)
+		}
+	})
+
+	t.Run("success returns the user's experiments", func(t *testing.T) {
+		var gotUserID uuid.UUID
+		store := &fakeStore{
+			t: t,
+			listByUserFn: func(ctx context.Context, userID uuid.UUID) ([]experiments.Experiment, error) {
+				gotUserID = userID
+				return []experiments.Experiment{
+					{ID: uuid.New(), UserID: userID},
+					{ID: uuid.New(), UserID: userID},
+				}, nil
+			},
+		}
+		req := newTestRequest("GET", "", "", true)
+		rec := httptest.NewRecorder()
+
+		handleListExperiments(store)(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("status = %d, want 200 (body=%s)", rec.Code, rec.Body.String())
+		}
+		if gotUserID != testUserID {
+			t.Errorf("userID passed to store = %v, want %v", gotUserID, testUserID)
+		}
+		body := decodeEnvelope(t, rec)
+		list, ok := body.Data.([]any)
+		if !ok || len(list) != 2 {
+			t.Errorf("data = %+v, want 2 experiments", body.Data)
 		}
 	})
 }

@@ -35,6 +35,7 @@ type Store interface {
 	EnsureProfile(ctx context.Context, userID uuid.UUID) error
 	Create(ctx context.Context, userID uuid.UUID, title *string, rawData, config map[string]any) (Experiment, error)
 	GetByID(ctx context.Context, id, userID uuid.UUID) (Experiment, error)
+	ListByUser(ctx context.Context, userID uuid.UUID) ([]Experiment, error)
 	UpdateConfig(ctx context.Context, id, userID uuid.UUID, config map[string]any) (Experiment, error)
 }
 
@@ -89,6 +90,34 @@ func (r *Repository) GetByID(ctx context.Context, id, userID uuid.UUID) (Experim
 		return Experiment{}, err
 	}
 	return e, nil
+}
+
+// ListByUser returns all of userID's experiments, most recently created
+// first. Always non-nil, even when there are no rows, so callers can
+// serialize it directly as a JSON array.
+func (r *Repository) ListByUser(ctx context.Context, userID uuid.UUID) ([]Experiment, error) {
+	rows, err := r.pool.Query(ctx,
+		`select id, user_id, title, raw_data, config, created_at, updated_at
+		 from experiments where user_id = $1 order by created_at desc`,
+		userID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	list := []Experiment{}
+	for rows.Next() {
+		var e Experiment
+		if err := rows.Scan(&e.ID, &e.UserID, &e.Title, &e.RawData, &e.Config, &e.CreatedAt, &e.UpdatedAt); err != nil {
+			return nil, err
+		}
+		list = append(list, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return list, nil
 }
 
 func (r *Repository) UpdateConfig(ctx context.Context, id, userID uuid.UUID, config map[string]any) (Experiment, error) {

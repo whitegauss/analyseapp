@@ -118,6 +118,31 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+    get:
+      tags: [experiments]
+      summary: List the authenticated user's experiments
+      description: Most recently created first. No pagination yet.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: OK (possibly an empty array)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/Experiment"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /api/v1/experiments/{id}:
     get:
       tags: [experiments]

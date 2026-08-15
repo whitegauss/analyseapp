@@ -58,6 +58,24 @@ func handleCreateExperiment(repo experiments.Store) http.HandlerFunc {
 	}
 }
 
+func handleListExperiments(repo experiments.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID, ok := auth.UserID(r.Context())
+		if !ok {
+			response.WriteError(w, http.StatusUnauthorized, "unauthorized", "missing authenticated user")
+			return
+		}
+
+		list, err := repo.ListByUser(r.Context(), userID)
+		if err != nil {
+			response.WriteError(w, http.StatusInternalServerError, "internal_error", "failed to list experiments")
+			return
+		}
+
+		response.WriteData(w, http.StatusOK, list)
+	}
+}
+
 func handleGetExperiment(repo experiments.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID, ok := auth.UserID(r.Context())

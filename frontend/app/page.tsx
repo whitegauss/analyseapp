@@ -66,9 +66,17 @@ export default async function Home() {
 
         {user && (
           <div className="flex flex-col gap-4">
-            <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
-              実験データを追加
-            </h2>
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
+                実験データを追加
+              </h2>
+              <Link
+                href="/experiments"
+                className="text-sm text-zinc-600 underline dark:text-zinc-400"
+              >
+                保存済みの実験一覧を見る
+              </Link>
+            </div>
             <ExperimentEditor />
           </div>
         )}
