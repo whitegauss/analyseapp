@@ -196,6 +196,89 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /api/v1/experiments/{id}/analyze:
+    post:
+      tags: [experiments]
+      summary: Run an analysis against an experiment's stored data
+      description: |
+        Fetches the experiment's `raw_data` (ownership-checked, same as
+        `GET /experiments/{id}`), then proxies `{type, data, params}` to the
+        Python worker's `POST /analyze` and returns its response verbatim —
+        the worker already replies with the same `{data, error, meta}`
+        envelope this API uses, so no re-wrapping happens.
+
+        Successful (200) results are cached in Redis for 24h, keyed by
+        `analysis:{experiment_id}:{type}:{params_hash}` (PDR.md section 7).
+        A cache hit skips both the experiment lookup and the worker call.
+        The response carries `X-Cache: HIT` or `X-Cache: MISS`. An
+        unreachable Redis degrades to always-miss rather than failing the
+        request.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ExperimentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AnalyzeRequest"
+            example:
+              type: linear_regression
+              params: {}
+      responses:
+        "200":
+          description: Analysis result (from the worker, or from the Redis cache; status/body passed through as-is)
+          headers:
+            X-Cache:
+              description: "`HIT` if served from Redis, `MISS` if the worker was called"
+              schema:
+                type: string
+                enum: [HIT, MISS]
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          type:
+                            type: string
+                          result:
+                            type: object
+                            additionalProperties: true
+              example:
+                data:
+                  type: linear_regression
+                  result: { slope: 2.0, intercept: 1.0, r_squared: 1.0 }
+                error: null
+                meta: {}
+        "400":
+          description: Malformed body, `type` missing, or `id` is not a valid UUID (or a worker-reported analysis error, e.g. unknown type/missing column — passed through with the worker's own error code)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Envelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "502":
+          description: The Python worker could not be reached
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Envelope"
+              example:
+                data: null
+                error: { code: worker_unreachable, message: "failed to reach analysis worker" }
+                meta: {}
+
 components:
   securitySchemes:
     bearerAuth:
@@ -339,3 +422,15 @@ components:
       properties:
         config:
           $ref: "#/components/schemas/ExperimentConfig"
+
+    AnalyzeRequest:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          description: Analysis type registered in the Python worker (e.g. `linear_regression`).
+        params:
+          type: object
+          additionalProperties: true
+          description: 'Forwarded to the worker as-is (e.g. `{"weighted": true}`).'

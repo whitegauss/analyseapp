@@ -1,6 +1,8 @@
 import { notFound, redirect } from "next/navigation";
 import { callGoApi, GoApiError } from "@/lib/api";
-import ExperimentChart from "@/components/ExperimentChart";
+import ExperimentChart, {
+  type LinearRegressionResult,
+} from "@/components/ExperimentChart";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +17,25 @@ type Experiment = {
 function readAxisLabel(config: Record<string, unknown>, key: string): string {
   const label = config[key];
   return typeof label === "string" ? label : "";
+}
+
+// The regression line is best-effort: too little data, non-numeric
+// columns, etc. just mean no overlay rather than a broken page.
+async function fetchLinearRegression(
+  id: string,
+): Promise<LinearRegressionResult | null> {
+  try {
+    const res = await callGoApi<{
+      type: string;
+      result: LinearRegressionResult;
+    }>(`/api/v1/experiments/${id}/analyze`, {
+      method: "POST",
+      body: JSON.stringify({ type: "linear_regression" }),
+    });
+    return res?.result ?? null;
+  } catch {
+    return null;
+  }
 }
 
 export default async function ExperimentPage({
@@ -38,6 +59,8 @@ export default async function ExperimentPage({
     redirect("/login");
   }
 
+  const regression = await fetchLinearRegression(id);
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-zinc-50 p-8 dark:bg-black">
       <main className="flex w-full max-w-3xl flex-col gap-6 rounded-lg border border-zinc-200 bg-white p-8 dark:border-zinc-800 dark:bg-zinc-900">
@@ -49,6 +72,7 @@ export default async function ExperimentPage({
           title={experiment.title ?? "(無題)"}
           xAxisLabel={readAxisLabel(experiment.config, "x_axis_label")}
           yAxisLabel={readAxisLabel(experiment.config, "y_axis_label")}
+          regression={regression}
         />
       </main>
     </div>
