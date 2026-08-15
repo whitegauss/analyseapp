@@ -51,6 +51,7 @@ export default function ExperimentChart({
   regression = null,
 }: Props) {
   const [showRegression, setShowRegression] = useState(true);
+  const [legendFontSize, setLegendFontSize] = useState(12);
   const { x, y, ...rest } = columns;
 
   const trace: Partial<Data> = {
@@ -100,16 +101,30 @@ export default function ExperimentChart({
               title: { text: title },
               xaxis: axisLayout(xAxisLabel, "x"),
               yaxis: axisLayout(yAxisLabel, "y"),
+              showlegend: true,
+              legend: { font: { size: legendFontSize } },
               autosize: true,
               margin: { t: 48, r: 24, b: 48, l: 56 },
             }}
             style={{ width: "100%", height: "480px" }}
             useResizeHandler
-            config={{ responsive: true }}
+            config={{ responsive: true, edits: { legendPosition: true } }}
           />
         </div>
       </div>
       {xAxisLabel.trim() && <AxisLabel label={xAxisLabel} />}
+
+      <label className="flex items-center gap-2 text-xs text-zinc-600 dark:text-zinc-400">
+        凡例の文字サイズ
+        <input
+          type="range"
+          min={8}
+          max={24}
+          value={legendFontSize}
+          onChange={(e) => setLegendFontSize(Number(e.target.value))}
+        />
+        <span className="w-8 text-right">{legendFontSize}px</span>
+      </label>
 
       {regression && (
         <div className="flex flex-col items-center gap-1 text-sm text-zinc-600 dark:text-zinc-400">
