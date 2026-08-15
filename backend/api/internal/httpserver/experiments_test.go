@@ -27,6 +27,7 @@ type fakeStore struct {
 	getByIDFn      func(ctx context.Context, id, userID uuid.UUID) (experiments.Experiment, error)
 	listByUserFn   func(ctx context.Context, userID uuid.UUID) ([]experiments.Experiment, error)
 	updateConfigFn func(ctx context.Context, id, userID uuid.UUID, config map[string]any) (experiments.Experiment, error)
+	deleteFn       func(ctx context.Context, id, userID uuid.UUID) error
 }
 
 func (f *fakeStore) EnsureProfile(ctx context.Context, userID uuid.UUID) error {
@@ -59,6 +60,13 @@ func (f *fakeStore) UpdateConfig(ctx context.Context, id, userID uuid.UUID, conf
 		f.t.Fatal("unexpected call to UpdateConfig")
 	}
 	return f.updateConfigFn(ctx, id, userID, config)
+}
+
+func (f *fakeStore) Delete(ctx context.Context, id, userID uuid.UUID) error {
+	if f.deleteFn == nil {
+		f.t.Fatal("unexpected call to Delete")
+	}
+	return f.deleteFn(ctx, id, userID)
 }
 
 // newTestRequest builds a request carrying a chi "id" URL param and,
@@ -311,6 +319,79 @@ func TestHandleListExperiments(t *testing.T) {
 		list, ok := body.Data.([]any)
 		if !ok || len(list) != 2 {
 			t.Errorf("data = %+v, want 2 experiments", body.Data)
+		}
+	})
+}
+
+func TestHandleDeleteExperiment(t *testing.T) {
+	t.Run("unauthenticated", func(t *testing.T) {
+		store := &fakeStore{t: t}
+		req := newTestRequest("DELETE", uuid.New().String(), "", false)
+		rec := httptest.NewRecorder()
+
+		handleDeleteExperiment(store)(rec, req)
+
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("status = %d, want 401", rec.Code)
+		}
+	})
+
+	t.Run("invalid id", func(t *testing.T) {
+		store := &fakeStore{t: t}
+		req := newTestRequest("DELETE", "not-a-uuid", "", true)
+		rec := httptest.NewRecorder()
+
+		handleDeleteExperiment(store)(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("status = %d, want 400", rec.Code)
+		}
+		if body := decodeEnvelope(t, rec); body.Error == nil || body.Error.Code != "invalid_id" {
+			t.Errorf("error code = %+v, want invalid_id", body.Error)
+		}
+	})
+
+	t.Run("not found", func(t *testing.T) {
+		store := &fakeStore{
+			t: t,
+			deleteFn: func(ctx context.Context, id, userID uuid.UUID) error {
+				return experiments.ErrNotFound
+			},
+		}
+		req := newTestRequest("DELETE", uuid.New().String(), "", true)
+		rec := httptest.NewRecorder()
+
+		handleDeleteExperiment(store)(rec, req)
+
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("status = %d, want 404", rec.Code)
+		}
+	})
+
+	t.Run("success", func(t *testing.T) {
+		id := uuid.New()
+		var gotID, gotUserID uuid.UUID
+		store := &fakeStore{
+			t: t,
+			deleteFn: func(ctx context.Context, id, userID uuid.UUID) error {
+				gotID = id
+				gotUserID = userID
+				return nil
+			},
+		}
+		req := newTestRequest("DELETE", id.String(), "", true)
+		rec := httptest.NewRecorder()
+
+		handleDeleteExperiment(store)(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("status = %d, want 200 (body=%s)", rec.Code, rec.Body.String())
+		}
+		if gotID != id {
+			t.Errorf("id passed to store = %v, want %v", gotID, id)
+		}
+		if gotUserID != testUserID {
+			t.Errorf("userID passed to store = %v, want %v", gotUserID, testUserID)
 		}
 	})
 }

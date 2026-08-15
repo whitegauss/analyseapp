@@ -42,6 +42,7 @@ func NewRouter(dbPool *pgxpool.Pool, jwks keyfunc.Keyfunc, workerClient worker.C
 				r.Post("/experiments", handleCreateExperiment(repo))
 				r.Get("/experiments", handleListExperiments(repo))
 				r.Get("/experiments/{id}", handleGetExperiment(repo))
+				r.Delete("/experiments/{id}", handleDeleteExperiment(repo))
 				r.Patch("/experiments/{id}/config", handleUpdateExperimentConfig(repo))
 				r.Post("/experiments/{id}/analyze", handleAnalyzeExperiment(repo, workerClient, resultCache))
 			}

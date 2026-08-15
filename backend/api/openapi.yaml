@@ -177,6 +177,43 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+    delete:
+      tags: [experiments]
+      summary: Delete an experiment
+      description: Only deletes experiments owned by the authenticated user. Associated analysis_results rows are removed via an ON DELETE CASCADE foreign key.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ExperimentId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          id:
+                            type: string
+                            format: uuid
+        "400":
+          description: "`id` is not a valid UUID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Envelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /api/v1/experiments/{id}/config:
     patch:
       tags: [experiments]

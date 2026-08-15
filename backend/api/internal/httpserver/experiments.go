@@ -104,6 +104,33 @@ func handleGetExperiment(repo experiments.Store) http.HandlerFunc {
 	}
 }
 
+func handleDeleteExperiment(repo experiments.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID, ok := auth.UserID(r.Context())
+		if !ok {
+			response.WriteError(w, http.StatusUnauthorized, "unauthorized", "missing authenticated user")
+			return
+		}
+
+		id, err := uuid.Parse(chi.URLParam(r, "id"))
+		if err != nil {
+			response.WriteError(w, http.StatusBadRequest, "invalid_id", "id is not a valid UUID")
+			return
+		}
+
+		if err := repo.Delete(r.Context(), id, userID); err != nil {
+			if err == experiments.ErrNotFound {
+				response.WriteError(w, http.StatusNotFound, "not_found", "experiment not found")
+				return
+			}
+			response.WriteError(w, http.StatusInternalServerError, "internal_error", "failed to delete experiment")
+			return
+		}
+
+		response.WriteData(w, http.StatusOK, map[string]string{"id": id.String()})
+	}
+}
+
 func handleUpdateExperimentConfig(repo experiments.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID, ok := auth.UserID(r.Context())

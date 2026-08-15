@@ -3,6 +3,7 @@
 
 # Local work log (not shared via git)
 WORKLOG.md
+WORKLOG_ARCHIVE.md
 
 # Go
 backend/api/api

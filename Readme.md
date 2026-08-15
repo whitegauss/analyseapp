@@ -75,6 +75,7 @@ curl -X POST "$SUPABASE_URL/auth/v1/signup" \
 - `POST /api/v1/experiments` — `{title, raw_data, config?}` を送信し実験を作成（`title`は省略・`null`可。空文字は`null`として保存されます）
 - `GET /api/v1/experiments` — 自分が作成した実験を作成日時の新しい順に一覧取得（ページネーションなし）
 - `GET /api/v1/experiments/{id}` — 自分が作成した実験を取得（他人のIDや存在しないIDは404）
+- `DELETE /api/v1/experiments/{id}` — 自分が作成した実験を削除（他人のIDや存在しないIDは404）。関連する`analysis_results`行はDBの`ON DELETE CASCADE`で一緒に削除されます
 - `PATCH /api/v1/experiments/{id}/config` — `{config}` でグラフ設定を丸ごと置き換え
 - `POST /api/v1/experiments/{id}/analyze` — `{type, params?}` を送信し、その実験の`raw_data`に対して解析を実行（例: `{"type":"linear_regression"}`）。Go APIが実験を取得したうえでPython Workerの`POST /analyze`に中継し、Workerのレスポンス（`{data, error, meta}`）をそのまま返します。Workerに到達できない場合は`502`（`worker_unreachable`）。成功した結果はRedisに24hキャッシュされ（`analysis:{experiment_id}:{type}:{params_hash}`、PDR.md §7）、レスポンスヘッダー`X-Cache: HIT`/`MISS`でキャッシュ命中を確認できます。キャッシュ命中時はDB・Worker呼び出し自体が発生しません。Redisに到達できない場合もキャッシュなしで通常通り動作します
 
@@ -93,6 +94,7 @@ curl -X POST "$SUPABASE_URL/auth/v1/signup" \
 - `/experiments/{id}`表示時にサーバー側で`POST /api/v1/experiments/{id}/analyze`（`type: linear_regression`）を自動実行し、回帰直線をグラフに重ね描画します。「回帰直線を表示」チェックボックスでオン/オフ可能（既定はオン）。傾き・切片・R²も表示。データ不足などで解析が失敗した場合は回帰直線なしで生データのみ表示されます（ページ全体は壊れません）
 - 回帰直線はトップページの保存前ライブプレビューには表示されません（解析は保存済み実験の`raw_data`に対してのみ実行されるため）
 - `/experiments`で保存済みの実験を一覧できます（作成日時の新しい順、タイトルと作成日を表示、クリックで`/experiments/{id}`へ）。トップページの「実験データを追加」見出し横にリンクがあります。1件も無い場合は空状態メッセージを表示
+- 一覧の各行に「削除」ボタンがあり、押すとその場でインラインの確認（「削除する」/「キャンセル」）に切り替わります（ブラウザのalert/confirmダイアログは使用しません）。削除すると`/experiments`に戻り一覧から消えます
 - 保存済み実験（`/experiments/{id}`）のデータ自体・軸ラベルの事後編集は未実装（作成時に設定した内容のみ。Go側にPATCH `/config`は既にあるが、フロントの編集UIをまだ`/experiments/{id}`に用意していない）
 
 ## Python Worker（解析）

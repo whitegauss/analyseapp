@@ -49,3 +49,26 @@ export async function createExperiment(
 
   redirect(`/experiments/${experiment.id}`);
 }
+
+export async function deleteExperiment(formData: FormData): Promise<void> {
+  const id = String(formData.get("id") ?? "");
+  if (!id) return;
+
+  let result: { id: string } | null;
+  try {
+    result = await callGoApi<{ id: string }>(`/api/v1/experiments/${id}`, {
+      method: "DELETE",
+    });
+  } catch (e) {
+    if (e instanceof GoApiError && e.status === 404) {
+      redirect("/experiments");
+    }
+    throw e;
+  }
+
+  if (!result) {
+    redirect("/login");
+  }
+
+  redirect("/experiments");
+}

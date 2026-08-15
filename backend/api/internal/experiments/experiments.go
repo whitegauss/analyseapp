@@ -37,6 +37,7 @@ type Store interface {
 	GetByID(ctx context.Context, id, userID uuid.UUID) (Experiment, error)
 	ListByUser(ctx context.Context, userID uuid.UUID) ([]Experiment, error)
 	UpdateConfig(ctx context.Context, id, userID uuid.UUID, config map[string]any) (Experiment, error)
+	Delete(ctx context.Context, id, userID uuid.UUID) error
 }
 
 type Repository struct {
@@ -118,6 +119,23 @@ func (r *Repository) ListByUser(ctx context.Context, userID uuid.UUID) ([]Experi
 		return nil, err
 	}
 	return list, nil
+}
+
+// Delete removes an experiment owned by userID. analysis_results rows for it
+// are removed too, via the table's "on delete cascade" FK (see
+// 00004_create_analysis_results.sql) -- no application-level cleanup needed.
+func (r *Repository) Delete(ctx context.Context, id, userID uuid.UUID) error {
+	tag, err := r.pool.Exec(ctx,
+		`delete from experiments where id = $1 and user_id = $2`,
+		id, userID,
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (r *Repository) UpdateConfig(ctx context.Context, id, userID uuid.UUID, config map[string]any) (Experiment, error) {

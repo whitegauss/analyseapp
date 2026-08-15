@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { callGoApi } from "@/lib/api";
+import DeleteExperimentButton from "@/components/DeleteExperimentButton";
 
 export const dynamic = "force-dynamic";
 
@@ -37,18 +38,22 @@ export default async function ExperimentsListPage() {
         ) : (
           <ul className="flex flex-col divide-y divide-zinc-200 dark:divide-zinc-800">
             {experiments.map((e) => (
-              <li key={e.id}>
+              <li
+                key={e.id}
+                className="flex items-center justify-between gap-4 py-3 hover:bg-zinc-50 dark:hover:bg-zinc-800"
+              >
                 <Link
                   href={`/experiments/${e.id}`}
-                  className="flex items-center justify-between gap-4 py-3 hover:bg-zinc-50 dark:hover:bg-zinc-800"
+                  className="flex min-w-0 flex-1 items-center justify-between gap-4"
                 >
-                  <span className="text-sm text-zinc-900 dark:text-zinc-50">
+                  <span className="truncate text-sm text-zinc-900 dark:text-zinc-50">
                     {e.title ?? "(無題)"}
                   </span>
                   <span className="shrink-0 text-xs text-zinc-500 dark:text-zinc-400">
                     {e.created_at.slice(0, 10)}
                   </span>
                 </Link>
+                <DeleteExperimentButton id={e.id} title={e.title ?? "(無題)"} />
               </li>
             ))}
           </ul>
