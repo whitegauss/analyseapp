@@ -4,16 +4,20 @@ package main
 import (
 	"context"
 	"net/http"
+	"time"
 
 	"github.com/MicahParks/keyfunc/v3"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog/log"
 
 	"analyseapp/api/internal/auth"
+	"analyseapp/api/internal/cache"
 	"analyseapp/api/internal/config"
 	"analyseapp/api/internal/db"
 	"analyseapp/api/internal/httpserver"
 	"analyseapp/api/internal/logging"
+	"analyseapp/api/internal/worker"
 )
 
 func main() {
@@ -43,7 +47,20 @@ func main() {
 		log.Warn().Msg("SUPABASE_URL not set; /api/v1 routes will not be mounted")
 	}
 
-	router := httpserver.NewRouter(dbPool, jwks)
+	workerClient := &worker.HTTPClient{
+		BaseURL: cfg.WorkerBaseURL,
+		HTTP:    &http.Client{Timeout: 10 * time.Second},
+	}
+
+	redisClient := redis.NewClient(&redis.Options{Addr: cfg.RedisAddr})
+	defer func() {
+		if err := redisClient.Close(); err != nil {
+			log.Warn().Err(err).Msg("failed to close redis client")
+		}
+	}()
+	resultCache := &cache.RedisCache{Client: redisClient}
+
+	router := httpserver.NewRouter(dbPool, jwks, workerClient, resultCache)
 
 	log.Info().Str("port", cfg.Port).Msg("starting api server")
 	if err := http.ListenAndServe(":"+cfg.Port, router); err != nil {

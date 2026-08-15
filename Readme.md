@@ -7,12 +7,12 @@
 ## 技術スタック
 - **API Gateway/BFF**: Go（[go-chi](https://github.com/go-chi/chi) + [zerolog](https://github.com/rs/zerolog)）
 - **解析ワーカー**: Python（FastAPI + structlog + numpy、将来的にgRPC常駐プロセス化を予定）
-- **キャッシュ**: Redis
+- **キャッシュ**: Redis（[go-redis](https://github.com/redis/go-redis)）。解析結果を`analysis:{experiment_id}:{type}:{params_hash}`キーで24hキャッシュ（PDR.md §7）
 - **DB/認証**: Supabase（PostgreSQL / Auth）。Go APIが `DATABASE_URL` で直接Postgresに接続する唯一の経路（[pgx](https://github.com/jackc/pgx)）。認証はSupabase AuthのJWT（JWKS/ES256）をGo APIが検証（[golang-jwt](https://github.com/golang-jwt/jwt) + [keyfunc](https://github.com/MicahParks/keyfunc)）
 - **フロントエンド**: Next.js 16（App Router）/ React 19 / TypeScript 5 / Tailwind CSS v4 / ESLint 9（`@/` エイリアス構成）。認証は [@supabase/ssr](https://github.com/supabase/ssr) でCookieベースのセッション管理（Server Actions + `proxy.ts`でのセッションリフレッシュ）。グラフ描画は [Plotly.js](https://plotly.com/javascript/)（PDR.md §6）。軸ラベルの数式表示は [KaTeX](https://katex.org/)
 - **コンテナ/開発基盤**: Docker Compose
 
-現状はバックエンド（SupabaseのPostgres接続・スキーマ・JWT認証・experiments CRUD・Python Workerでの線形回帰解析）に加え、フロントエンドのログイン画面と実験データ入力・グラフ表示まで実装済みです。ログイン後はトップページ（`/`）で直接データ貼り付け→ライブプレビュー→保存ができ、保存後は`/experiments/{id}`で確認できます。軸ラベルは1つのテキスト欄に`$v$`のように`$...$`で数式部分を囲んで入力すると、その部分だけKaTeXで数式（変数は斜体）として描画され、それ以外は単位・日本語も含めそのまま立体表示されます（PDR.md §6の`axis_label_runs`の考え方をベースにしたシンプル版）。解析結果（回帰直線など）のグラフ重ね描画、experiments一覧UI、Go↔Worker間の解析連携（`POST /api/v1/experiments/{id}/analyze`）は今後追加していきます。
+現状はバックエンド（SupabaseのPostgres接続・スキーマ・JWT認証・experiments CRUD・Python Workerでの線形回帰解析）に加え、フロントエンドのログイン画面と実験データ入力・グラフ表示まで実装済みです。ログイン後はトップページ（`/`）で直接データ貼り付け→ライブプレビュー→保存ができ、保存後は`/experiments/{id}`で確認できます。軸ラベルは1つのテキスト欄に`$v$`のように`$...$`で数式部分を囲んで入力すると、その部分だけKaTeXで数式（変数は斜体）として描画され、それ以外は単位・日本語も含めそのまま立体表示されます（PDR.md §6の`axis_label_runs`の考え方をベースにしたシンプル版）。`/experiments/{id}`では線形回帰の回帰直線がグラフに自動で重ね描画されます（オフにもできます）。experiments一覧UIは今後追加していきます。
 
 ## 使用方法
 1. Docker と Docker Compose が利用できる環境を用意します。
@@ -75,6 +75,7 @@ curl -X POST "$SUPABASE_URL/auth/v1/signup" \
 - `POST /api/v1/experiments` — `{title, raw_data, config?}` を送信し実験を作成（`title`は省略・`null`可。空文字は`null`として保存されます）
 - `GET /api/v1/experiments/{id}` — 自分が作成した実験を取得（他人のIDや存在しないIDは404）
 - `PATCH /api/v1/experiments/{id}/config` — `{config}` でグラフ設定を丸ごと置き換え
+- `POST /api/v1/experiments/{id}/analyze` — `{type, params?}` を送信し、その実験の`raw_data`に対して解析を実行（例: `{"type":"linear_regression"}`）。Go APIが実験を取得したうえでPython Workerの`POST /analyze`に中継し、Workerのレスポンス（`{data, error, meta}`）をそのまま返します。Workerに到達できない場合は`502`（`worker_unreachable`）。成功した結果はRedisに24hキャッシュされ（`analysis:{experiment_id}:{type}:{params_hash}`、PDR.md §7）、レスポンスヘッダー`X-Cache: HIT`/`MISS`でキャッシュ命中を確認できます。キャッシュ命中時はDB・Worker呼び出し自体が発生しません。Redisに到達できない場合もキャッシュなしで通常通り動作します
 
 ## 実験データ入力・グラフ表示（フロントエンド）
 
@@ -88,7 +89,8 @@ curl -X POST "$SUPABASE_URL/auth/v1/signup" \
 - グラフはPlotlyのデフォルトのx=0/y=0のゼロラインを非表示にしています
 - 「保存してグラフを確定」を押すとGo APIに保存され、`/experiments/{id}` にリダイレクトして確定版のグラフを表示（`y_error`/`x_error`があればエラーバー付き、軸ラベルも保存した内容で表示）
 - トップページの入力フォーム・`/experiments/{id}`は未ログインだと`/login`にリダイレクトされる
-- 現状は生データのプロットのみで、回帰直線などの解析結果表示は未実装（Go側に`/analyze`中継エンドポイントを作った後に対応予定）
+- `/experiments/{id}`表示時にサーバー側で`POST /api/v1/experiments/{id}/analyze`（`type: linear_regression`）を自動実行し、回帰直線をグラフに重ね描画します。「回帰直線を表示」チェックボックスでオン/オフ可能（既定はオン）。傾き・切片・R²も表示。データ不足などで解析が失敗した場合は回帰直線なしで生データのみ表示されます（ページ全体は壊れません）
+- 回帰直線はトップページの保存前ライブプレビューには表示されません（解析は保存済み実験の`raw_data`に対してのみ実行されるため）
 - 保存済み実験（`/experiments/{id}`）のデータ自体・軸ラベルの事後編集は未実装（作成時に設定した内容のみ。Go側にPATCH `/config`は既にあるが、フロントの編集UIをまだ`/experiments/{id}`に用意していない）
 
 ## Python Worker（解析）

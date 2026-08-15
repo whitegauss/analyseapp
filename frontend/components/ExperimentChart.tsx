@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import type { Data } from "plotly.js";
 import ChartSkeleton from "./ChartSkeleton";
@@ -13,11 +14,21 @@ const Plot = dynamic(() => import("react-plotly.js"), {
   loading: () => <ChartSkeleton />,
 });
 
+export type LinearRegressionResult = {
+  slope: number;
+  intercept: number;
+  slope_stderr: number;
+  intercept_stderr: number;
+  r_squared: number;
+  weighted: boolean;
+};
+
 type Props = {
   columns: Record<string, number[]>;
   title: string;
   xAxisLabel?: string;
   yAxisLabel?: string;
+  regression?: LinearRegressionResult | null;
 };
 
 function axisLayout(label: string, fallbackTitle: string) {
@@ -37,7 +48,9 @@ export default function ExperimentChart({
   title,
   xAxisLabel = "",
   yAxisLabel = "",
+  regression = null,
 }: Props) {
+  const [showRegression, setShowRegression] = useState(true);
   const { x, y, ...rest } = columns;
 
   const trace: Partial<Data> = {
@@ -46,6 +59,7 @@ export default function ExperimentChart({
     type: "scatter",
     mode: "markers",
     marker: { size: 8 },
+    name: "データ",
   };
 
   if (rest.y_error) {
@@ -55,13 +69,33 @@ export default function ExperimentChart({
     trace.error_x = { type: "data", array: rest.x_error, visible: true };
   }
 
+  // A straight line only needs its two endpoints -- computing y at every x
+  // (rather than reusing the worker's per-point predicted_y) also avoids a
+  // zig-zag line if x isn't sorted in the pasted data.
+  const regressionTrace: Partial<Data> | null = useMemo(() => {
+    if (!regression || !showRegression || x.length === 0) return null;
+    const xMin = Math.min(...x);
+    const xMax = Math.max(...x);
+    return {
+      x: [xMin, xMax],
+      y: [
+        regression.slope * xMin + regression.intercept,
+        regression.slope * xMax + regression.intercept,
+      ],
+      type: "scatter",
+      mode: "lines",
+      name: "回帰直線",
+      line: { color: "#ef4444" },
+    };
+  }, [regression, showRegression, x]);
+
   return (
     <div className="flex flex-col items-center gap-1">
       <div className="flex w-full items-center gap-2">
         {yAxisLabel.trim() && <AxisLabel label={yAxisLabel} vertical />}
         <div className="min-w-0 flex-1">
           <Plot
-            data={[trace]}
+            data={regressionTrace ? [trace, regressionTrace] : [trace]}
             layout={{
               title: { text: title },
               xaxis: axisLayout(xAxisLabel, "x"),
@@ -76,6 +110,28 @@ export default function ExperimentChart({
         </div>
       </div>
       {xAxisLabel.trim() && <AxisLabel label={xAxisLabel} />}
+
+      {regression && (
+        <div className="flex flex-col items-center gap-1 text-sm text-zinc-600 dark:text-zinc-400">
+          <label className="flex items-center gap-1.5">
+            <input
+              type="checkbox"
+              checked={showRegression}
+              onChange={(e) => setShowRegression(e.target.checked)}
+            />
+            回帰直線を表示
+          </label>
+          {showRegression && (
+            <p>
+              y = {regression.slope.toFixed(4)}x +{" "}
+              {regression.intercept.toFixed(4)}
+              {"　"}(slope誤差 ±{regression.slope_stderr.toFixed(4)}, R² ={" "}
+              {regression.r_squared.toFixed(4)}
+              {regression.weighted ? "、誤差重み付き" : ""})
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }

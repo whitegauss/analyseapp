@@ -9,17 +9,22 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"analyseapp/api/internal/auth"
+	"analyseapp/api/internal/cache"
 	"analyseapp/api/internal/experiments"
 	"analyseapp/api/internal/logging"
 	"analyseapp/api/internal/response"
+	"analyseapp/api/internal/worker"
 )
 
 // NewRouter builds the top-level chi router for the API service.
 // dbPool may be nil (e.g. DATABASE_URL not configured yet), in which case
 // /readyz reports not-ready and /api/v1 routes fail with 503 rather than
 // panicking. jwks gates every /api/v1 route behind Supabase JWT verification
-// (PDR.md section 8: browser auth = Supabase OAuth JWT).
-func NewRouter(dbPool *pgxpool.Pool, jwks keyfunc.Keyfunc) http.Handler {
+// (PDR.md section 8: browser auth = Supabase OAuth JWT). workerClient and
+// resultCache are always non-nil (WORKER_BASE_URL/REDIS_ADDR have
+// local-dev defaults); an unreachable Redis degrades resultCache to
+// always-miss rather than breaking requests.
+func NewRouter(dbPool *pgxpool.Pool, jwks keyfunc.Keyfunc, workerClient worker.Client, resultCache cache.Cache) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(middleware.Recoverer)
@@ -37,8 +42,9 @@ func NewRouter(dbPool *pgxpool.Pool, jwks keyfunc.Keyfunc) http.Handler {
 				r.Post("/experiments", handleCreateExperiment(repo))
 				r.Get("/experiments/{id}", handleGetExperiment(repo))
 				r.Patch("/experiments/{id}/config", handleUpdateExperimentConfig(repo))
+				r.Post("/experiments/{id}/analyze", handleAnalyzeExperiment(repo, workerClient, resultCache))
 			}
-			// analyze, convert (PDR.md section 8) land here in follow-up work.
+			// convert (PDR.md section 8) lands here in follow-up work.
 		})
 	}
 
