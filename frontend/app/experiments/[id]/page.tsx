@@ -3,6 +3,8 @@ import { callGoApi, GoApiError } from "@/lib/api";
 import ExperimentChart, {
   type LinearRegressionResult,
 } from "@/components/ExperimentChart";
+import AxisLabelEditor from "@/components/AxisLabelEditor";
+import RawDataEditor from "@/components/RawDataEditor";
 
 export const dynamic = "force-dynamic";
 
@@ -74,6 +76,17 @@ export default async function ExperimentPage({
           yAxisLabel={readAxisLabel(experiment.config, "y_axis_label")}
           regression={regression}
         />
+        <div className="flex flex-wrap items-start gap-3">
+          <AxisLabelEditor
+            id={experiment.id}
+            xAxisLabel={readAxisLabel(experiment.config, "x_axis_label")}
+            yAxisLabel={readAxisLabel(experiment.config, "y_axis_label")}
+          />
+          <RawDataEditor
+            id={experiment.id}
+            columns={experiment.raw_data.columns}
+          />
+        </div>
       </main>
     </div>
   );

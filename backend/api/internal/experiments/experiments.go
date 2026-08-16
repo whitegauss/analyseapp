@@ -37,6 +37,7 @@ type Store interface {
 	GetByID(ctx context.Context, id, userID uuid.UUID) (Experiment, error)
 	ListByUser(ctx context.Context, userID uuid.UUID) ([]Experiment, error)
 	UpdateConfig(ctx context.Context, id, userID uuid.UUID, config map[string]any) (Experiment, error)
+	UpdateRawData(ctx context.Context, id, userID uuid.UUID, rawData map[string]any) (Experiment, error)
 	Delete(ctx context.Context, id, userID uuid.UUID) error
 }
 
@@ -145,6 +146,23 @@ func (r *Repository) UpdateConfig(ctx context.Context, id, userID uuid.UUID, con
 		 where id = $2 and user_id = $3
 		 returning id, user_id, title, raw_data, config, created_at, updated_at`,
 		config, id, userID,
+	).Scan(&e.ID, &e.UserID, &e.Title, &e.RawData, &e.Config, &e.CreatedAt, &e.UpdatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Experiment{}, ErrNotFound
+		}
+		return Experiment{}, err
+	}
+	return e, nil
+}
+
+func (r *Repository) UpdateRawData(ctx context.Context, id, userID uuid.UUID, rawData map[string]any) (Experiment, error) {
+	var e Experiment
+	err := r.pool.QueryRow(ctx,
+		`update experiments set raw_data = $1, updated_at = now()
+		 where id = $2 and user_id = $3
+		 returning id, user_id, title, raw_data, config, created_at, updated_at`,
+		rawData, id, userID,
 	).Scan(&e.ID, &e.UserID, &e.Title, &e.RawData, &e.Config, &e.CreatedAt, &e.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

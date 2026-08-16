@@ -50,6 +50,80 @@ export async function createExperiment(
   redirect(`/experiments/${experiment.id}`);
 }
 
+export type UpdateAxisLabelsState = { error?: string };
+
+export async function updateAxisLabels(
+  _prevState: UpdateAxisLabelsState,
+  formData: FormData,
+): Promise<UpdateAxisLabelsState> {
+  const id = String(formData.get("id") ?? "");
+  if (!id) return { error: "実験IDが不正です" };
+
+  const config = {
+    x_axis_label: String(formData.get("xAxisLabel") ?? "").trim(),
+    y_axis_label: String(formData.get("yAxisLabel") ?? "").trim(),
+  };
+
+  let experiment: Experiment | null;
+  try {
+    experiment = await callGoApi<Experiment>(
+      `/api/v1/experiments/${id}/config`,
+      { method: "PATCH", body: JSON.stringify({ config }) },
+    );
+  } catch (e) {
+    if (e instanceof GoApiError) {
+      return { error: e.message };
+    }
+    return { error: e instanceof Error ? e.message : String(e) };
+  }
+
+  if (!experiment) {
+    redirect("/login");
+  }
+
+  redirect(`/experiments/${id}`);
+}
+
+export type UpdateRawDataState = { error?: string };
+
+export async function updateRawData(
+  _prevState: UpdateRawDataState,
+  formData: FormData,
+): Promise<UpdateRawDataState> {
+  const id = String(formData.get("id") ?? "");
+  if (!id) return { error: "実験IDが不正です" };
+
+  const columnsJson = String(formData.get("columns") ?? "");
+  let columns: Record<string, number[]>;
+  try {
+    columns = JSON.parse(columnsJson);
+  } catch {
+    return { error: "データが正しく貼り付けられていません" };
+  }
+  if (!columns.x || !columns.y) {
+    return { error: "x列とy列のデータが必要です" };
+  }
+
+  let experiment: Experiment | null;
+  try {
+    experiment = await callGoApi<Experiment>(
+      `/api/v1/experiments/${id}/raw_data`,
+      { method: "PATCH", body: JSON.stringify({ raw_data: { columns } }) },
+    );
+  } catch (e) {
+    if (e instanceof GoApiError) {
+      return { error: e.message };
+    }
+    return { error: e instanceof Error ? e.message : String(e) };
+  }
+
+  if (!experiment) {
+    redirect("/login");
+  }
+
+  redirect(`/experiments/${id}`);
+}
+
 export async function deleteExperiment(formData: FormData): Promise<void> {
   const id = String(formData.get("id") ?? "");
   if (!id) return;

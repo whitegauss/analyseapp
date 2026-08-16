@@ -258,6 +258,56 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /api/v1/experiments/{id}/raw_data:
+    patch:
+      tags: [experiments]
+      summary: Replace an experiment's raw_data
+      description: |
+        `raw_data` is replaced wholesale (not merged). Invalidates any cached
+        `/analyze` results for this experiment (best-effort), since a cached
+        result is keyed by type/params but not by raw_data and would
+        otherwise keep serving stale analysis output computed from the old
+        data for up to the cache's 24h TTL.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ExperimentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateRawDataRequest"
+            example:
+              raw_data:
+                columns:
+                  x: [0, 1, 2]
+                  y: [1.1, 2.9, 5.2]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Experiment"
+        "400":
+          description: Malformed body, `raw_data` missing, or `id` is not a valid UUID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Envelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /api/v1/experiments/{id}/analyze:
     post:
       tags: [experiments]
@@ -484,6 +534,13 @@ components:
       properties:
         config:
           $ref: "#/components/schemas/ExperimentConfig"
+
+    UpdateRawDataRequest:
+      type: object
+      required: [raw_data]
+      properties:
+        raw_data:
+          $ref: "#/components/schemas/DataSeries"
 
     AnalyzeRequest:
       type: object

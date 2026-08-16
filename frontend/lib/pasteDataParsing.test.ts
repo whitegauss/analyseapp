@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildColumns, parsePastedText } from "./pasteDataParsing";
+import {
+  buildColumns,
+  columnsToInitialRoles,
+  columnsToPastedText,
+  parsePastedText,
+} from "./pasteDataParsing";
 
 describe("parsePastedText", () => {
   it("splits tab-delimited rows (spreadsheet paste)", () => {
@@ -105,5 +110,63 @@ describe("buildColumns", () => {
   it("ignores a column left unassigned (defaults to __ignore__)", () => {
     const parsed = parsePastedText("0\t1\t9\n1\t3\t8");
     expect(buildColumns(parsed, {}, {})).toEqual({ x: [0, 1], y: [1, 3] });
+  });
+});
+
+describe("columnsToPastedText / columnsToInitialRoles", () => {
+  it("reconstructs tab-separated text for x/y-only columns", () => {
+    const columns = { x: [0, 1, 2], y: [1, 3, 5] };
+    expect(columnsToPastedText(columns)).toBe("0\t1\n1\t3\n2\t5");
+    expect(columnsToInitialRoles(columns)).toEqual({
+      extraRoles: {},
+      customNames: {},
+    });
+  });
+
+  it("round-trips through parsePastedText/buildColumns for a named error column", () => {
+    const columns = { x: [0, 1], y: [1, 3], y_error: [0.1, 0.2] };
+    const text = columnsToPastedText(columns);
+    const { extraRoles, customNames } = columnsToInitialRoles(columns);
+
+    expect(text).toBe("0\t1\t0.1\n1\t3\t0.2");
+    expect(extraRoles).toEqual({ 2: "y_error" });
+
+    const rebuilt = buildColumns(
+      parsePastedText(text),
+      extraRoles,
+      customNames,
+    );
+    expect(rebuilt).toEqual(columns);
+  });
+
+  it("round-trips an arbitrarily named column as __custom__", () => {
+    const columns = { x: [0, 1], y: [1, 3], weight: [9, 8] };
+    const text = columnsToPastedText(columns);
+    const { extraRoles, customNames } = columnsToInitialRoles(columns);
+
+    expect(extraRoles).toEqual({ 2: "__custom__" });
+    expect(customNames).toEqual({ 2: "weight" });
+
+    const rebuilt = buildColumns(
+      parsePastedText(text),
+      extraRoles,
+      customNames,
+    );
+    expect(rebuilt).toEqual(columns);
+  });
+
+  it("orders multiple extra columns alphabetically by name", () => {
+    const columns = {
+      x: [0, 1],
+      y: [1, 3],
+      y_error: [0.1, 0.2],
+      x_error: [0.5, 0.6],
+    };
+    const text = columnsToPastedText(columns);
+    const { extraRoles } = columnsToInitialRoles(columns);
+
+    // Alphabetical: x_error before y_error.
+    expect(text).toBe("0\t1\t0.5\t0.1\n1\t3\t0.6\t0.2");
+    expect(extraRoles).toEqual({ 2: "x_error", 3: "y_error" });
   });
 });

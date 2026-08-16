@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 
 	"analyseapp/api/internal/auth"
+	"analyseapp/api/internal/cache"
 	"analyseapp/api/internal/experiments"
 	"analyseapp/api/internal/response"
 )
@@ -22,12 +23,13 @@ var testUserID = uuid.MustParse("11111111-1111-1111-1111-111111111111")
 // tests, so handler validation/status-code logic is testable without a
 // database. Unset function fields fail the test if called.
 type fakeStore struct {
-	t              *testing.T
-	createFn       func(ctx context.Context, userID uuid.UUID, title *string, rawData, config map[string]any) (experiments.Experiment, error)
-	getByIDFn      func(ctx context.Context, id, userID uuid.UUID) (experiments.Experiment, error)
-	listByUserFn   func(ctx context.Context, userID uuid.UUID) ([]experiments.Experiment, error)
-	updateConfigFn func(ctx context.Context, id, userID uuid.UUID, config map[string]any) (experiments.Experiment, error)
-	deleteFn       func(ctx context.Context, id, userID uuid.UUID) error
+	t               *testing.T
+	createFn        func(ctx context.Context, userID uuid.UUID, title *string, rawData, config map[string]any) (experiments.Experiment, error)
+	getByIDFn       func(ctx context.Context, id, userID uuid.UUID) (experiments.Experiment, error)
+	listByUserFn    func(ctx context.Context, userID uuid.UUID) ([]experiments.Experiment, error)
+	updateConfigFn  func(ctx context.Context, id, userID uuid.UUID, config map[string]any) (experiments.Experiment, error)
+	updateRawDataFn func(ctx context.Context, id, userID uuid.UUID, rawData map[string]any) (experiments.Experiment, error)
+	deleteFn        func(ctx context.Context, id, userID uuid.UUID) error
 }
 
 func (f *fakeStore) EnsureProfile(ctx context.Context, userID uuid.UUID) error {
@@ -60,6 +62,13 @@ func (f *fakeStore) UpdateConfig(ctx context.Context, id, userID uuid.UUID, conf
 		f.t.Fatal("unexpected call to UpdateConfig")
 	}
 	return f.updateConfigFn(ctx, id, userID, config)
+}
+
+func (f *fakeStore) UpdateRawData(ctx context.Context, id, userID uuid.UUID, rawData map[string]any) (experiments.Experiment, error) {
+	if f.updateRawDataFn == nil {
+		f.t.Fatal("unexpected call to UpdateRawData")
+	}
+	return f.updateRawDataFn(ctx, id, userID, rawData)
 }
 
 func (f *fakeStore) Delete(ctx context.Context, id, userID uuid.UUID) error {
@@ -471,6 +480,117 @@ func TestHandleUpdateExperimentConfig(t *testing.T) {
 
 		if rec.Code != http.StatusOK {
 			t.Errorf("status = %d, want 200 (body=%s)", rec.Code, rec.Body.String())
+		}
+	})
+}
+
+func TestHandleUpdateExperimentRawData(t *testing.T) {
+	t.Run("unauthenticated", func(t *testing.T) {
+		store := &fakeStore{t: t}
+		req := newTestRequest("PATCH", uuid.New().String(), `{"raw_data":{}}`, false)
+		rec := httptest.NewRecorder()
+
+		handleUpdateExperimentRawData(store, newFakeCache())(rec, req)
+
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("status = %d, want 401", rec.Code)
+		}
+	})
+
+	t.Run("invalid id", func(t *testing.T) {
+		store := &fakeStore{t: t}
+		req := newTestRequest("PATCH", "not-a-uuid", `{"raw_data":{}}`, true)
+		rec := httptest.NewRecorder()
+
+		handleUpdateExperimentRawData(store, newFakeCache())(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("status = %d, want 400", rec.Code)
+		}
+		if body := decodeEnvelope(t, rec); body.Error == nil || body.Error.Code != "invalid_id" {
+			t.Errorf("error code = %+v, want invalid_id", body.Error)
+		}
+	})
+
+	t.Run("missing raw_data", func(t *testing.T) {
+		store := &fakeStore{t: t}
+		req := newTestRequest("PATCH", uuid.New().String(), `{}`, true)
+		rec := httptest.NewRecorder()
+
+		handleUpdateExperimentRawData(store, newFakeCache())(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("status = %d, want 400", rec.Code)
+		}
+		if body := decodeEnvelope(t, rec); body.Error == nil || body.Error.Code != "invalid_raw_data" {
+			t.Errorf("error code = %+v, want invalid_raw_data", body.Error)
+		}
+	})
+
+	t.Run("not found", func(t *testing.T) {
+		store := &fakeStore{
+			t: t,
+			updateRawDataFn: func(ctx context.Context, id, userID uuid.UUID, rawData map[string]any) (experiments.Experiment, error) {
+				return experiments.Experiment{}, experiments.ErrNotFound
+			},
+		}
+		req := newTestRequest("PATCH", uuid.New().String(), `{"raw_data":{"columns":{"x":[1]}}}`, true)
+		rec := httptest.NewRecorder()
+
+		handleUpdateExperimentRawData(store, newFakeCache())(rec, req)
+
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("status = %d, want 404", rec.Code)
+		}
+	})
+
+	t.Run("success invalidates any cached analysis results for the experiment", func(t *testing.T) {
+		id := uuid.New()
+		fc := newFakeCache()
+		staleKey, err := cache.AnalysisKey(id, "linear_regression", map[string]any{})
+		if err != nil {
+			t.Fatalf("compute cache key: %v", err)
+		}
+		fc.store[staleKey] = []byte(`{"data":{"result":{"slope":1}},"error":null,"meta":{}}`)
+		otherKey, err := cache.AnalysisKey(uuid.New(), "linear_regression", map[string]any{})
+		if err != nil {
+			t.Fatalf("compute cache key: %v", err)
+		}
+		fc.store[otherKey] = []byte(`{"data":{"result":{"slope":9}},"error":null,"meta":{}}`)
+
+		var gotID, gotUserID uuid.UUID
+		var gotRawData map[string]any
+		store := &fakeStore{
+			t: t,
+			updateRawDataFn: func(ctx context.Context, id, userID uuid.UUID, rawData map[string]any) (experiments.Experiment, error) {
+				gotID = id
+				gotUserID = userID
+				gotRawData = rawData
+				return experiments.Experiment{ID: id, UserID: userID, RawData: rawData}, nil
+			},
+		}
+		req := newTestRequest("PATCH", id.String(), `{"raw_data":{"columns":{"x":[1,2],"y":[2,4]}}}`, true)
+		rec := httptest.NewRecorder()
+
+		handleUpdateExperimentRawData(store, fc)(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("status = %d, want 200 (body=%s)", rec.Code, rec.Body.String())
+		}
+		if gotID != id {
+			t.Errorf("id passed to store = %v, want %v", gotID, id)
+		}
+		if gotUserID != testUserID {
+			t.Errorf("userID passed to store = %v, want %v", gotUserID, testUserID)
+		}
+		if gotRawData == nil {
+			t.Fatal("raw_data was not passed to store")
+		}
+		if _, ok := fc.store[staleKey]; ok {
+			t.Error("stale cached analysis result for this experiment was not invalidated")
+		}
+		if _, ok := fc.store[otherKey]; !ok {
+			t.Error("another experiment's cached analysis result was incorrectly invalidated")
 		}
 	})
 }

@@ -44,6 +44,7 @@ func NewRouter(dbPool *pgxpool.Pool, jwks keyfunc.Keyfunc, workerClient worker.C
 				r.Get("/experiments/{id}", handleGetExperiment(repo))
 				r.Delete("/experiments/{id}", handleDeleteExperiment(repo))
 				r.Patch("/experiments/{id}/config", handleUpdateExperimentConfig(repo))
+				r.Patch("/experiments/{id}/raw_data", handleUpdateExperimentRawData(repo, resultCache))
 				r.Post("/experiments/{id}/analyze", handleAnalyzeExperiment(repo, workerClient, resultCache))
 			}
 			// convert (PDR.md section 8) lands here in follow-up work.

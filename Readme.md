@@ -77,6 +77,7 @@ curl -X POST "$SUPABASE_URL/auth/v1/signup" \
 - `GET /api/v1/experiments/{id}` — 自分が作成した実験を取得（他人のIDや存在しないIDは404）
 - `DELETE /api/v1/experiments/{id}` — 自分が作成した実験を削除（他人のIDや存在しないIDは404）。関連する`analysis_results`行はDBの`ON DELETE CASCADE`で一緒に削除されます
 - `PATCH /api/v1/experiments/{id}/config` — `{config}` でグラフ設定を丸ごと置き換え
+- `PATCH /api/v1/experiments/{id}/raw_data` — `{raw_data}` でデータ本体を丸ごと置き換え。成功するとこの実験のRedisキャッシュ済み解析結果（`analysis:{experiment_id}:*`）を全て無効化します（ベストエフォート。Redisに到達できない場合も更新自体は成功します）
 - `POST /api/v1/experiments/{id}/analyze` — `{type, params?}` を送信し、その実験の`raw_data`に対して解析を実行（例: `{"type":"linear_regression"}`）。Go APIが実験を取得したうえでPython Workerの`POST /analyze`に中継し、Workerのレスポンス（`{data, error, meta}`）をそのまま返します。Workerに到達できない場合は`502`（`worker_unreachable`）。成功した結果はRedisに24hキャッシュされ（`analysis:{experiment_id}:{type}:{params_hash}`、PDR.md §7）、レスポンスヘッダー`X-Cache: HIT`/`MISS`でキャッシュ命中を確認できます。キャッシュ命中時はDB・Worker呼び出し自体が発生しません。Redisに到達できない場合もキャッシュなしで通常通り動作します
 
 ## 実験データ入力・グラフ表示（フロントエンド）
@@ -96,7 +97,8 @@ curl -X POST "$SUPABASE_URL/auth/v1/signup" \
 - 回帰直線はトップページの保存前ライブプレビューには表示されません（解析は保存済み実験の`raw_data`に対してのみ実行されるため）
 - `/experiments`で保存済みの実験を一覧できます（作成日時の新しい順、タイトルと作成日を表示、クリックで`/experiments/{id}`へ）。トップページの「実験データを追加」見出し横にリンクがあります。1件も無い場合は空状態メッセージを表示
 - 一覧の各行に「削除」ボタンがあり、押すとその場でインラインの確認（「削除する」/「キャンセル」）に切り替わります（ブラウザのalert/confirmダイアログは使用しません）。削除すると`/experiments`に戻り一覧から消えます
-- 保存済み実験（`/experiments/{id}`）のデータ自体・軸ラベルの事後編集は未実装（作成時に設定した内容のみ。Go側にPATCH `/config`は既にあるが、フロントの編集UIをまだ`/experiments/{id}`に用意していない）
+- `/experiments/{id}`の「軸ラベルを編集」ボタンから軸ラベル（X軸・Y軸）を事後編集できます（インラインフォーム、`PATCH /api/v1/experiments/{id}/config`を呼び出し）。保存すると同じページを再読み込みし、更新後の内容がグラフに反映されます
+- `/experiments/{id}`の「データを編集」ボタンからも同様にデータ本体（`raw_data`）を事後編集できます。作成時と同じスプレッドシート貼り付け形式（テキストエリア＋3列目以降の役割選択）で、現在のデータを再構成した状態で編集を開始できます（`PATCH /api/v1/experiments/{id}/raw_data`を呼び出し、`raw_data`は丸ごと置き換え）。データを編集すると、Redisにキャッシュされていたこの実験の解析結果（回帰直線など）は自動的に無効化され、次回表示時に再計算されます
 
 ## Python Worker（解析）
 

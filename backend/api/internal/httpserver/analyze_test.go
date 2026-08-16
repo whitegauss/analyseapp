@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -44,6 +45,15 @@ func (c *fakeCache) Get(ctx context.Context, key string) ([]byte, bool, error) {
 
 func (c *fakeCache) Set(ctx context.Context, key string, value []byte, ttl time.Duration) error {
 	c.store[key] = value
+	return nil
+}
+
+func (c *fakeCache) DeleteByPrefix(ctx context.Context, prefix string) error {
+	for key := range c.store {
+		if strings.HasPrefix(key, prefix) {
+			delete(c.store, key)
+		}
+	}
 	return nil
 }
 

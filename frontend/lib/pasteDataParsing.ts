@@ -81,3 +81,49 @@ export function buildColumns(
 
   return result;
 }
+
+// The inverse of buildColumns, for pre-filling the paste textarea when
+// editing an already-saved experiment's data. Column order is x, y, then
+// any extra columns sorted alphabetically by name (an arbitrary but stable
+// order, since raw_data only stores a name -> values map with no ordering
+// of its own) -- columnsToInitialRoles below uses the same order so the
+// role selector lines up with the reconstructed columns.
+export function columnsToPastedText(columns: Record<string, number[]>): string {
+  const extraKeys = Object.keys(columns)
+    .filter((k) => k !== "x" && k !== "y")
+    .sort();
+  const orderedKeys = ["x", "y", ...extraKeys];
+  const rowCount = columns.x?.length ?? 0;
+
+  const rows: string[] = [];
+  for (let i = 0; i < rowCount; i++) {
+    rows.push(orderedKeys.map((key) => String(columns[key][i])).join("\t"));
+  }
+  return rows.join("\n");
+}
+
+// Pre-selects each extra column's role to match its original name in
+// columns (y_error/x_error map to their named role, anything else becomes
+// a __custom__ column with that name), so re-parsing the reconstructed text
+// with these roles round-trips back to the original columns.
+export function columnsToInitialRoles(columns: Record<string, number[]>): {
+  extraRoles: Record<number, string>;
+  customNames: Record<number, string>;
+} {
+  const extraKeys = Object.keys(columns)
+    .filter((k) => k !== "x" && k !== "y")
+    .sort();
+
+  const extraRoles: Record<number, string> = {};
+  const customNames: Record<number, string> = {};
+  extraKeys.forEach((key, i) => {
+    const col = i + 2;
+    if (key === "y_error" || key === "x_error") {
+      extraRoles[col] = key;
+    } else {
+      extraRoles[col] = "__custom__";
+      customNames[col] = key;
+    }
+  });
+  return { extraRoles, customNames };
+}
