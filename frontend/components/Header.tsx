@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { signOut } from "@/app/actions";
+import ToolsMenu from "./ToolsMenu";
 
 export default async function Header() {
   const supabase = await createClient();
@@ -10,12 +11,15 @@ export default async function Header() {
 
   return (
     <header className="flex items-center justify-between border-b border-zinc-200 bg-white px-6 py-3 dark:border-zinc-800 dark:bg-zinc-900">
-      <Link
-        href="/"
-        className="text-lg font-semibold text-zinc-900 dark:text-zinc-50"
-      >
-        AnalyseApp
-      </Link>
+      <div className="flex items-center gap-3">
+        <ToolsMenu />
+        <Link
+          href="/"
+          className="text-lg font-semibold text-zinc-900 dark:text-zinc-50"
+        >
+          AnalyseApp
+        </Link>
+      </div>
 
       <div className="flex items-center gap-4 text-sm">
         {user ? (

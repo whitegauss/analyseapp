@@ -70,6 +70,12 @@ export default async function ExperimentPage({
           id={experiment.id}
           columns={experiment.raw_data.columns}
         />
+        <a
+          href={`/experiments/${experiment.id}/export`}
+          className="self-start text-xs text-zinc-500 underline hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
+        >
+          CSVダウンロード
+        </a>
       </div>
     </CenteredCard>
   );
