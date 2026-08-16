@@ -5,6 +5,7 @@ import ExperimentChart, {
 } from "@/components/ExperimentChart";
 import AxisLabelEditor from "@/components/AxisLabelEditor";
 import RawDataEditor from "@/components/RawDataEditor";
+import CenteredCard from "@/components/CenteredCard";
 
 export const dynamic = "force-dynamic";
 
@@ -64,30 +65,28 @@ export default async function ExperimentPage({
   const regression = await fetchLinearRegression(id);
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 p-8 dark:bg-black">
-      <main className="flex w-full max-w-3xl flex-col gap-6 rounded-lg border border-zinc-200 bg-white p-8 dark:border-zinc-800 dark:bg-zinc-900">
-        <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
-          {experiment.title ?? "(無題)"}
-        </h1>
-        <ExperimentChart
-          columns={experiment.raw_data.columns}
-          title={experiment.title ?? "(無題)"}
+    <CenteredCard maxWidth="max-w-3xl">
+      <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
+        {experiment.title ?? "(無題)"}
+      </h1>
+      <ExperimentChart
+        columns={experiment.raw_data.columns}
+        title={experiment.title ?? "(無題)"}
+        xAxisLabel={readAxisLabel(experiment.config, "x_axis_label")}
+        yAxisLabel={readAxisLabel(experiment.config, "y_axis_label")}
+        regression={regression}
+      />
+      <div className="flex flex-wrap items-start gap-3">
+        <AxisLabelEditor
+          id={experiment.id}
           xAxisLabel={readAxisLabel(experiment.config, "x_axis_label")}
           yAxisLabel={readAxisLabel(experiment.config, "y_axis_label")}
-          regression={regression}
         />
-        <div className="flex flex-wrap items-start gap-3">
-          <AxisLabelEditor
-            id={experiment.id}
-            xAxisLabel={readAxisLabel(experiment.config, "x_axis_label")}
-            yAxisLabel={readAxisLabel(experiment.config, "y_axis_label")}
-          />
-          <RawDataEditor
-            id={experiment.id}
-            columns={experiment.raw_data.columns}
-          />
-        </div>
-      </main>
-    </div>
+        <RawDataEditor
+          id={experiment.id}
+          columns={experiment.raw_data.columns}
+        />
+      </div>
+    </CenteredCard>
   );
 }

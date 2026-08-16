@@ -9,7 +9,7 @@ import {
 import { parsePastedText, buildColumns } from "@/lib/pasteDataParsing";
 import ExperimentChart from "./ExperimentChart";
 import ChartSkeleton from "./ChartSkeleton";
-import ColumnRoleSelector from "./ColumnRoleSelector";
+import PasteDataFields from "./PasteDataFields";
 import AxisLabelInput from "./AxisLabelInput";
 import InfoTooltip from "./InfoTooltip";
 
@@ -33,11 +33,6 @@ export default function ExperimentEditor() {
     [parsed, extraRoles, customNames],
   );
 
-  const extraColumnIndexes = Array.from(
-    { length: Math.max(parsed.columnCount - 2, 0) },
-    (_, i) => i + 2,
-  );
-
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
       <form action={formAction} className="flex flex-col gap-4">
@@ -52,36 +47,20 @@ export default function ExperimentEditor() {
           />
         </label>
 
-        <label className="flex flex-col gap-1 text-sm text-zinc-700 dark:text-zinc-300">
-          データ（スプレッドシートからコピー＆ペースト。1列目=x, 2列目=y）
-          <textarea
-            rows={8}
-            value={pastedText}
-            onChange={(e) => setPastedText(e.target.value)}
-            placeholder={"0\t1\n1\t3\n2\t5"}
-            className="rounded-md border border-zinc-300 bg-transparent px-3 py-2 font-mono text-sm dark:border-zinc-700"
-          />
-        </label>
-
-        {parsed.error && (
-          <p className="text-sm text-red-600 dark:text-red-400">
-            {parsed.error}
-          </p>
-        )}
-
-        {extraColumnIndexes.length > 0 && !parsed.error && (
-          <ColumnRoleSelector
-            extraColumnIndexes={extraColumnIndexes}
-            extraRoles={extraRoles}
-            customNames={customNames}
-            onRoleChange={(col, value) =>
-              setExtraRoles((prev) => ({ ...prev, [col]: value }))
-            }
-            onCustomNameChange={(col, value) =>
-              setCustomNames((prev) => ({ ...prev, [col]: value }))
-            }
-          />
-        )}
+        <PasteDataFields
+          pastedText={pastedText}
+          onPastedTextChange={setPastedText}
+          parsed={parsed}
+          extraRoles={extraRoles}
+          customNames={customNames}
+          onRoleChange={(col, value) =>
+            setExtraRoles((prev) => ({ ...prev, [col]: value }))
+          }
+          onCustomNameChange={(col, value) =>
+            setCustomNames((prev) => ({ ...prev, [col]: value }))
+          }
+          placeholder={"0\t1\n1\t3\n2\t5"}
+        />
 
         <div className="flex flex-col gap-4 rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
           <h2 className="flex items-center gap-1.5 text-sm font-medium text-zinc-500 dark:text-zinc-400">
