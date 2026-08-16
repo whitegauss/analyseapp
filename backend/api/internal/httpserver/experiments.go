@@ -1,13 +1,8 @@
 package httpserver
 
 import (
-	"encoding/json"
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/google/uuid"
-
-	"analyseapp/api/internal/auth"
 	"analyseapp/api/internal/cache"
 	"analyseapp/api/internal/experiments"
 	"analyseapp/api/internal/response"
@@ -29,15 +24,13 @@ type updateRawDataRequest struct {
 
 func handleCreateExperiment(repo experiments.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		userID, ok := auth.UserID(r.Context())
+		userID, ok := requireUserID(w, r)
 		if !ok {
-			response.WriteError(w, http.StatusUnauthorized, "unauthorized", "missing authenticated user")
 			return
 		}
 
 		var req createExperimentRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			response.WriteError(w, http.StatusBadRequest, "invalid_body", "could not parse JSON body")
+		if !decodeJSONBody(w, r, &req) {
 			return
 		}
 		if req.Title != nil && *req.Title == "" {
@@ -65,9 +58,8 @@ func handleCreateExperiment(repo experiments.Store) http.HandlerFunc {
 
 func handleListExperiments(repo experiments.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		userID, ok := auth.UserID(r.Context())
+		userID, ok := requireUserID(w, r)
 		if !ok {
-			response.WriteError(w, http.StatusUnauthorized, "unauthorized", "missing authenticated user")
 			return
 		}
 
@@ -83,25 +75,18 @@ func handleListExperiments(repo experiments.Store) http.HandlerFunc {
 
 func handleGetExperiment(repo experiments.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		userID, ok := auth.UserID(r.Context())
+		userID, ok := requireUserID(w, r)
 		if !ok {
-			response.WriteError(w, http.StatusUnauthorized, "unauthorized", "missing authenticated user")
 			return
 		}
-
-		id, err := uuid.Parse(chi.URLParam(r, "id"))
-		if err != nil {
-			response.WriteError(w, http.StatusBadRequest, "invalid_id", "id is not a valid UUID")
+		id, ok := parseIDParam(w, r)
+		if !ok {
 			return
 		}
 
 		e, err := repo.GetByID(r.Context(), id, userID)
 		if err != nil {
-			if err == experiments.ErrNotFound {
-				response.WriteError(w, http.StatusNotFound, "not_found", "experiment not found")
-				return
-			}
-			response.WriteError(w, http.StatusInternalServerError, "internal_error", "failed to get experiment")
+			writeExperimentError(w, err, "get experiment")
 			return
 		}
 
@@ -111,24 +96,17 @@ func handleGetExperiment(repo experiments.Store) http.HandlerFunc {
 
 func handleDeleteExperiment(repo experiments.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		userID, ok := auth.UserID(r.Context())
+		userID, ok := requireUserID(w, r)
 		if !ok {
-			response.WriteError(w, http.StatusUnauthorized, "unauthorized", "missing authenticated user")
 			return
 		}
-
-		id, err := uuid.Parse(chi.URLParam(r, "id"))
-		if err != nil {
-			response.WriteError(w, http.StatusBadRequest, "invalid_id", "id is not a valid UUID")
+		id, ok := parseIDParam(w, r)
+		if !ok {
 			return
 		}
 
 		if err := repo.Delete(r.Context(), id, userID); err != nil {
-			if err == experiments.ErrNotFound {
-				response.WriteError(w, http.StatusNotFound, "not_found", "experiment not found")
-				return
-			}
-			response.WriteError(w, http.StatusInternalServerError, "internal_error", "failed to delete experiment")
+			writeExperimentError(w, err, "delete experiment")
 			return
 		}
 
@@ -138,21 +116,17 @@ func handleDeleteExperiment(repo experiments.Store) http.HandlerFunc {
 
 func handleUpdateExperimentConfig(repo experiments.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		userID, ok := auth.UserID(r.Context())
+		userID, ok := requireUserID(w, r)
 		if !ok {
-			response.WriteError(w, http.StatusUnauthorized, "unauthorized", "missing authenticated user")
 			return
 		}
-
-		id, err := uuid.Parse(chi.URLParam(r, "id"))
-		if err != nil {
-			response.WriteError(w, http.StatusBadRequest, "invalid_id", "id is not a valid UUID")
+		id, ok := parseIDParam(w, r)
+		if !ok {
 			return
 		}
 
 		var req updateConfigRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			response.WriteError(w, http.StatusBadRequest, "invalid_body", "could not parse JSON body")
+		if !decodeJSONBody(w, r, &req) {
 			return
 		}
 		if req.Config == nil {
@@ -162,11 +136,7 @@ func handleUpdateExperimentConfig(repo experiments.Store) http.HandlerFunc {
 
 		e, err := repo.UpdateConfig(r.Context(), id, userID, req.Config)
 		if err != nil {
-			if err == experiments.ErrNotFound {
-				response.WriteError(w, http.StatusNotFound, "not_found", "experiment not found")
-				return
-			}
-			response.WriteError(w, http.StatusInternalServerError, "internal_error", "failed to update experiment config")
+			writeExperimentError(w, err, "update experiment config")
 			return
 		}
 
@@ -181,21 +151,17 @@ func handleUpdateExperimentConfig(repo experiments.Store) http.HandlerFunc {
 // output computed from the old data for up to cache.AnalysisTTL.
 func handleUpdateExperimentRawData(repo experiments.Store, resultCache cache.Cache) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		userID, ok := auth.UserID(r.Context())
+		userID, ok := requireUserID(w, r)
 		if !ok {
-			response.WriteError(w, http.StatusUnauthorized, "unauthorized", "missing authenticated user")
 			return
 		}
-
-		id, err := uuid.Parse(chi.URLParam(r, "id"))
-		if err != nil {
-			response.WriteError(w, http.StatusBadRequest, "invalid_id", "id is not a valid UUID")
+		id, ok := parseIDParam(w, r)
+		if !ok {
 			return
 		}
 
 		var req updateRawDataRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			response.WriteError(w, http.StatusBadRequest, "invalid_body", "could not parse JSON body")
+		if !decodeJSONBody(w, r, &req) {
 			return
 		}
 		if req.RawData == nil {
@@ -205,11 +171,7 @@ func handleUpdateExperimentRawData(repo experiments.Store, resultCache cache.Cac
 
 		e, err := repo.UpdateRawData(r.Context(), id, userID, req.RawData)
 		if err != nil {
-			if err == experiments.ErrNotFound {
-				response.WriteError(w, http.StatusNotFound, "not_found", "experiment not found")
-				return
-			}
-			response.WriteError(w, http.StatusInternalServerError, "internal_error", "failed to update experiment raw_data")
+			writeExperimentError(w, err, "update experiment raw_data")
 			return
 		}
 

@@ -4,10 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/google/uuid"
-
-	"analyseapp/api/internal/auth"
 	"analyseapp/api/internal/cache"
 	"analyseapp/api/internal/experiments"
 	"analyseapp/api/internal/logging"
@@ -34,21 +30,17 @@ type analyzeRequest struct {
 // optimization, not a correctness dependency.
 func handleAnalyzeExperiment(repo experiments.Store, workerClient worker.Client, resultCache cache.Cache) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		userID, ok := auth.UserID(r.Context())
+		userID, ok := requireUserID(w, r)
 		if !ok {
-			response.WriteError(w, http.StatusUnauthorized, "unauthorized", "missing authenticated user")
 			return
 		}
-
-		id, err := uuid.Parse(chi.URLParam(r, "id"))
-		if err != nil {
-			response.WriteError(w, http.StatusBadRequest, "invalid_id", "id is not a valid UUID")
+		id, ok := parseIDParam(w, r)
+		if !ok {
 			return
 		}
 
 		var req analyzeRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			response.WriteError(w, http.StatusBadRequest, "invalid_body", "could not parse JSON body")
+		if !decodeJSONBody(w, r, &req) {
 			return
 		}
 		if req.Type == "" {
@@ -74,11 +66,7 @@ func handleAnalyzeExperiment(repo experiments.Store, workerClient worker.Client,
 
 		e, err := repo.GetByID(r.Context(), id, userID)
 		if err != nil {
-			if err == experiments.ErrNotFound {
-				response.WriteError(w, http.StatusNotFound, "not_found", "experiment not found")
-				return
-			}
-			response.WriteError(w, http.StatusInternalServerError, "internal_error", "failed to get experiment")
+			writeExperimentError(w, err, "get experiment")
 			return
 		}
 

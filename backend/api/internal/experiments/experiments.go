@@ -49,6 +49,24 @@ func NewRepository(pool *pgxpool.Pool) *Repository {
 	return &Repository{pool: pool}
 }
 
+// queryRowExperiment runs a query expected to return exactly one experiments
+// row (in the column order id, user_id, title, raw_data, config, created_at,
+// updated_at) and scans it into an Experiment. A row-not-found result is
+// normalized to ErrNotFound -- shared by every Repository method whose query
+// is scoped to a single experiment by id/user_id.
+func (r *Repository) queryRowExperiment(ctx context.Context, query string, args ...any) (Experiment, error) {
+	var e Experiment
+	err := r.pool.QueryRow(ctx, query, args...).
+		Scan(&e.ID, &e.UserID, &e.Title, &e.RawData, &e.Config, &e.CreatedAt, &e.UpdatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Experiment{}, ErrNotFound
+		}
+		return Experiment{}, err
+	}
+	return e, nil
+}
+
 // EnsureProfile creates a profiles row for userID if one doesn't already
 // exist. Only needed on the create path: once an experiment exists its
 // user_id FK already guarantees the profile is present.
@@ -64,34 +82,20 @@ func (r *Repository) Create(ctx context.Context, userID uuid.UUID, title *string
 	if config == nil {
 		config = map[string]any{}
 	}
-
-	var e Experiment
-	err := r.pool.QueryRow(ctx,
+	return r.queryRowExperiment(ctx,
 		`insert into experiments (user_id, title, raw_data, config)
 		 values ($1, $2, $3, $4)
 		 returning id, user_id, title, raw_data, config, created_at, updated_at`,
 		userID, title, rawData, config,
-	).Scan(&e.ID, &e.UserID, &e.Title, &e.RawData, &e.Config, &e.CreatedAt, &e.UpdatedAt)
-	if err != nil {
-		return Experiment{}, err
-	}
-	return e, nil
+	)
 }
 
 func (r *Repository) GetByID(ctx context.Context, id, userID uuid.UUID) (Experiment, error) {
-	var e Experiment
-	err := r.pool.QueryRow(ctx,
+	return r.queryRowExperiment(ctx,
 		`select id, user_id, title, raw_data, config, created_at, updated_at
 		 from experiments where id = $1 and user_id = $2`,
 		id, userID,
-	).Scan(&e.ID, &e.UserID, &e.Title, &e.RawData, &e.Config, &e.CreatedAt, &e.UpdatedAt)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return Experiment{}, ErrNotFound
-		}
-		return Experiment{}, err
-	}
-	return e, nil
+	)
 }
 
 // ListByUser returns all of userID's experiments, most recently created
@@ -140,35 +144,19 @@ func (r *Repository) Delete(ctx context.Context, id, userID uuid.UUID) error {
 }
 
 func (r *Repository) UpdateConfig(ctx context.Context, id, userID uuid.UUID, config map[string]any) (Experiment, error) {
-	var e Experiment
-	err := r.pool.QueryRow(ctx,
+	return r.queryRowExperiment(ctx,
 		`update experiments set config = $1, updated_at = now()
 		 where id = $2 and user_id = $3
 		 returning id, user_id, title, raw_data, config, created_at, updated_at`,
 		config, id, userID,
-	).Scan(&e.ID, &e.UserID, &e.Title, &e.RawData, &e.Config, &e.CreatedAt, &e.UpdatedAt)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return Experiment{}, ErrNotFound
-		}
-		return Experiment{}, err
-	}
-	return e, nil
+	)
 }
 
 func (r *Repository) UpdateRawData(ctx context.Context, id, userID uuid.UUID, rawData map[string]any) (Experiment, error) {
-	var e Experiment
-	err := r.pool.QueryRow(ctx,
+	return r.queryRowExperiment(ctx,
 		`update experiments set raw_data = $1, updated_at = now()
 		 where id = $2 and user_id = $3
 		 returning id, user_id, title, raw_data, config, created_at, updated_at`,
 		rawData, id, userID,
-	).Scan(&e.ID, &e.UserID, &e.Title, &e.RawData, &e.Config, &e.CreatedAt, &e.UpdatedAt)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return Experiment{}, ErrNotFound
-		}
-		return Experiment{}, err
-	}
-	return e, nil
+	)
 }
