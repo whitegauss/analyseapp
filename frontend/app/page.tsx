@@ -1,6 +1,4 @@
-import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { signOut } from "./actions";
 import ExperimentEditor from "@/components/ExperimentEditor";
 import CenteredCard from "@/components/CenteredCard";
 
@@ -34,49 +32,11 @@ export default async function Home() {
         AnalyseApp
       </h1>
 
-      <div className="flex items-center justify-between gap-2 rounded-md border border-zinc-200 p-4 dark:border-zinc-800">
-        {user ? (
-          <>
-            <span className="text-sm text-zinc-700 dark:text-zinc-300">
-              ようこそ、{user.email} さん
-            </span>
-            <form action={signOut}>
-              <button
-                type="submit"
-                className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 dark:border-zinc-700 dark:text-zinc-300"
-              >
-                ログアウト
-              </button>
-            </form>
-          </>
-        ) : (
-          <>
-            <span className="text-sm text-zinc-500 dark:text-zinc-400">
-              ログインしていません
-            </span>
-            <Link
-              href="/login"
-              className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white dark:bg-zinc-50 dark:text-zinc-900"
-            >
-              ログイン
-            </Link>
-          </>
-        )}
-      </div>
-
       {user && (
         <div className="flex flex-col gap-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
-              実験データを追加
-            </h2>
-            <Link
-              href="/experiments"
-              className="text-sm text-zinc-600 underline dark:text-zinc-400"
-            >
-              保存済みの実験一覧を見る
-            </Link>
-          </div>
+          <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
+            実験データを追加
+          </h2>
           <ExperimentEditor />
         </div>
       )}

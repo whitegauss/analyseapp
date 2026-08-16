@@ -78,13 +78,21 @@ curl -X POST "$SUPABASE_URL/auth/v1/signup" \
 - `DELETE /api/v1/experiments/{id}` — 自分が作成した実験を削除（他人のIDや存在しないIDは404）。関連する`analysis_results`行はDBの`ON DELETE CASCADE`で一緒に削除されます
 - `PATCH /api/v1/experiments/{id}/config` — `{config}` でグラフ設定を丸ごと置き換え
 - `PATCH /api/v1/experiments/{id}/raw_data` — `{raw_data}` でデータ本体を丸ごと置き換え。成功するとこの実験のRedisキャッシュ済み解析結果（`analysis:{experiment_id}:*`）を全て無効化します（ベストエフォート。Redisに到達できない場合も更新自体は成功します）
-- `POST /api/v1/experiments/{id}/analyze` — `{type, params?}` を送信し、その実験の`raw_data`に対して解析を実行（例: `{"type":"linear_regression"}`）。Go APIが実験を取得したうえでPython Workerの`POST /analyze`に中継し、Workerのレスポンス（`{data, error, meta}`）をそのまま返します。Workerに到達できない場合は`502`（`worker_unreachable`）。成功した結果はRedisに24hキャッシュされ（`analysis:{experiment_id}:{type}:{params_hash}`、PDR.md §7）、レスポンスヘッダー`X-Cache: HIT`/`MISS`でキャッシュ命中を確認できます。キャッシュ命中時はDB・Worker呼び出し自体が発生しません。Redisに到達できない場合もキャッシュなしで通常通り動作します
+- `POST /api/v1/experiments/{id}/analyze` — `{type, params?}` を送信し、その実験の`raw_data`に対して解析を実行（例: `{"type":"linear_regression"}`）。`linear_regression`は`params`に`x_log`/`y_log`（真偽値、既定`false`）を渡すとlog10(x)・log10(y)に対して回帰します（片対数・両対数フィット。非正の値を持つデータ点はそのフィットから除外され、有効な点が2点未満なら`insufficient_data`エラー）。Go APIが実験を取得したうえでPython Workerの`POST /analyze`に中継し、Workerのレスポンス（`{data, error, meta}`）をそのまま返します。Workerに到達できない場合は`502`（`worker_unreachable`）。成功した結果はRedisに24hキャッシュされ（`analysis:{experiment_id}:{type}:{params_hash}`、PDR.md §7）、レスポンスヘッダー`X-Cache: HIT`/`MISS`でキャッシュ命中を確認できます。キャッシュ命中時はDB・Worker呼び出し自体が発生しません。Redisに到達できない場合もキャッシュなしで通常通り動作します
 
 ### セキュリティ・監視
 
 - `/api/v1`配下は接続元IP単位で100リクエスト/分にレート制限しています。超過すると`429`（`rate_limited`）が返ります（接続元IPはTCP接続自体から解決しており、リクエストヘッダーは信用していません。将来リバースプロキシを前段に置く場合は解決方法の見直しが必要です）
 - 全レスポンスに`X-Content-Type-Options`・`X-Frame-Options`・`Referrer-Policy`・`Strict-Transport-Security`のセキュリティヘッダーを付与しています（JSON APIのみのため`Content-Security-Policy`は設定していません）
 - `GET /metrics`でPrometheus形式のメトリクス（`http_requests_total`・`http_request_duration_seconds`をメソッド・ルートパターン・ステータスコード別に、`analysis_cache_results_total`を`/analyze`のキャッシュhit/miss別に）を公開しています。`/healthz`/`/readyz`と同様に認証なし・スクレイピングするPrometheusサーバー自体は未構築（本番運用時は外部公開しないようネットワーク側で制限してください）
+
+## ヘッダー・フッター（フロントエンド）
+
+全ページ共通のヘッダー・フッターを`app/layout.tsx`に組み込んでいます（`components/Header.tsx`/`components/Footer.tsx`）。
+
+- ヘッダー左側は「AnalyseApp」ロゴ（クリックでトップページへ）。右側にログイン状態を表示: ログイン中なら「保存済みの実験一覧」リンク・メールアドレス・ログアウトボタン、未ログインなら「ログインしていません」表示とログインボタン
+- ヘッダーは全ページ（トップ・ログイン・新規登録・実験一覧・実験詳細）に共通で表示され、Supabaseの認証状態をサーバー側で毎リクエスト確認します（`/login`・`/signup`もこの影響で動的レンダリングになります）
+- フッターはGitHubリポジトリへのリンクのみのシンプルな構成
 
 ## 実験データ入力・グラフ表示（フロントエンド）
 
@@ -105,6 +113,7 @@ curl -X POST "$SUPABASE_URL/auth/v1/signup" \
 - 一覧の各行に「削除」ボタンがあり、押すとその場でインラインの確認（「削除する」/「キャンセル」）に切り替わります（ブラウザのalert/confirmダイアログは使用しません）。削除すると`/experiments`に戻り一覧から消えます
 - `/experiments/{id}`の「軸ラベルを編集」ボタンから軸ラベル（X軸・Y軸）を事後編集できます（インラインフォーム、`PATCH /api/v1/experiments/{id}/config`を呼び出し）。保存すると同じページを再読み込みし、更新後の内容がグラフに反映されます
 - `/experiments/{id}`の「データを編集」ボタンからも同様にデータ本体（`raw_data`）を事後編集できます。作成時と同じスプレッドシート貼り付け形式（テキストエリア＋3列目以降の役割選択）で、現在のデータを再構成した状態で編集を開始できます（`PATCH /api/v1/experiments/{id}/raw_data`を呼び出し、`raw_data`は丸ごと置き換え）。データを編集すると、Redisにキャッシュされていたこの実験の解析結果（回帰直線など）は自動的に無効化され、次回表示時に再計算されます
+- 「X軸を対数表示」「Y軸を対数表示」チェックボックスで対数グラフに切り替えられます（保存前のプレビューでも表示のみ切り替え可能）。両方チェックすると両対数、片方だけなら片対数になります。保存済み実験（`/experiments/{id}`）でこれらをオンにすると、回帰直線もlog10変換後のデータに対して再フィットし直します（線形フィットをそのまま対数軸に重ねるのではなく、対数を取った後に改めて最小二乗フィットするため、両対数なら冪乗則・片対数なら指数関係がグラフ上で直線になります）。凡例・グラフ下の統計表示にも`log₁₀(x)`/`log₁₀(y)`を用いた式が表示されます。フィットは軸設定ごとに`/analyze`をクライアントから呼び出して取得し（初回のみ、以降は同一ページ内でキャッシュ）、非正の値を持つデータ点が多く残り2点未満になるなど計算できない場合はその旨のメッセージを表示します
 
 ## Python Worker（解析）
 
@@ -122,7 +131,8 @@ curl -X POST http://localhost:8001/analyze \
 ```
 
 - `y_error`カラムを渡すと逆分散重み付き回帰になります（外れ値の影響を誤差の大きさに応じて弱める）
-- 未対応の`type`やカラム欠如・長さ不一致は`400`＋エンベロープ形式のエラーで返ります
+- `params`に`x_log`/`y_log`（真偽値）を渡すとlog10(x)・log10(y)に対してフィットします（片対数・両対数）。非正の値を持つデータ点はフィットから除外（ログを取れないため）、`y_log`時の重み付けは誤差伝播（σ_log10(y) ≈ σ_y / (y・ln10)）で近似。有効な点が2点未満なら`insufficient_data`エラー
+- 未対応の`type`やカラム欠如・長さ不一致・（対数フィットで）データ不足は`400`＋エンベロープ形式のエラーで返ります
 - 新しい解析タイプを追加する場合は `backend/worker/app/analysis/` に新規ファイルを作り `@register("タイプ名")` を付けるだけで良い構造（`app/analysis/linear_regression.py`参照）
 
 ## ログイン画面

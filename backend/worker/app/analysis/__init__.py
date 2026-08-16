@@ -41,6 +41,10 @@ class MissingColumnError(AnalysisError):
         super().__init__(f"required column '{column}' is missing")
 
 
+class InsufficientDataError(AnalysisError):
+    code = "insufficient_data"
+
+
 def run(type_: str, data: DataSeries, params: dict[str, Any]) -> dict[str, Any]:
     fn = REGISTRY.get(type_)
     if fn is None:

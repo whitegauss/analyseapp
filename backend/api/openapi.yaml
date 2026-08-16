@@ -374,7 +374,7 @@ paths:
               $ref: "#/components/schemas/AnalyzeRequest"
             example:
               type: linear_regression
-              params: {}
+              params: { x_log: true, y_log: true }
       responses:
         "200":
           description: Analysis result (from the worker, or from the Redis cache; status/body passed through as-is)
@@ -601,4 +601,11 @@ components:
         params:
           type: object
           additionalProperties: true
-          description: 'Forwarded to the worker as-is (e.g. `{"weighted": true}`).'
+          description: |
+            Forwarded to the worker as-is. `linear_regression` accepts
+            `x_log`/`y_log` (bool, default `false`) to fit log10(x)/log10(y)
+            instead of x/y directly -- a semi-log fit (one of the two) for an
+            exponential relationship, a log-log fit (both) for a power law.
+            Points with a non-positive value on a log-transformed axis are
+            dropped from the fit; fewer than 2 remaining returns
+            `insufficient_data`.

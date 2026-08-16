@@ -7,9 +7,11 @@ type Props = {
   children: ReactNode;
 };
 
-// The "centered card on a full-height page" shell shared by every top-level
-// page (login, signup, top page, experiments list, experiment detail) --
-// only the card's max width and a couple of outer-spacing details differ.
+// The "centered card" shell shared by every top-level page (login, signup,
+// top page, experiments list, experiment detail) -- only the card's max
+// width and a couple of outer-spacing details differ. `flex-1` (rather than
+// its own min-h-screen) fills the space RootLayout leaves between the
+// persistent Header and Footer.
 export default function CenteredCard({
   maxWidth,
   outerPadded = true,
@@ -17,7 +19,7 @@ export default function CenteredCard({
   children,
 }: Props) {
   const outerClasses = [
-    "flex min-h-screen justify-center bg-zinc-50 dark:bg-black",
+    "flex flex-1 justify-center bg-zinc-50 dark:bg-black",
     verticallyCentered && "items-center",
     outerPadded && "p-8",
   ]

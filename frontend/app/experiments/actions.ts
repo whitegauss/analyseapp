@@ -2,6 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { callGoApi, GoApiError } from "@/lib/api";
+import type { LinearRegressionResult } from "@/components/ExperimentChart";
 
 type Experiment = { id: string };
 
@@ -145,4 +146,29 @@ export async function deleteExperiment(formData: FormData): Promise<void> {
   }
 
   redirect("/experiments");
+}
+
+// Runs a linear_regression analysis for an experiment. Best-effort, same as
+// the rest of the analyze integration: too little data, a fit that fails
+// (e.g. every point dropped by a log-scale fit's positive-value filter),
+// or no session at all just resolve to null rather than throwing, so a
+// missing regression never breaks the chart itself. Called both from the
+// server (the page's initial linear-scale fetch) and directly from the
+// client (ExperimentChart re-fetching when the user switches to a log axis).
+export async function fetchRegression(
+  id: string,
+  params: { x_log?: boolean; y_log?: boolean },
+): Promise<LinearRegressionResult | null> {
+  try {
+    const res = await callGoApi<{
+      type: string;
+      result: LinearRegressionResult;
+    }>(`/api/v1/experiments/${id}/analyze`, {
+      method: "POST",
+      body: JSON.stringify({ type: "linear_regression", params }),
+    });
+    return res?.result ?? null;
+  } catch {
+    return null;
+  }
 }
