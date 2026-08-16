@@ -7,6 +7,7 @@ import (
 	"analyseapp/api/internal/cache"
 	"analyseapp/api/internal/experiments"
 	"analyseapp/api/internal/logging"
+	"analyseapp/api/internal/metrics"
 	"analyseapp/api/internal/response"
 	"analyseapp/api/internal/worker"
 )
@@ -56,6 +57,7 @@ func handleAnalyzeExperiment(repo experiments.Store, workerClient worker.Client,
 		cacheKey, keyErr := cache.AnalysisKey(id, req.Type, params)
 		if keyErr == nil {
 			if cached, hit, err := resultCache.Get(r.Context(), cacheKey); err == nil && hit {
+				metrics.AnalysisCacheResultsTotal.WithLabelValues("hit").Inc()
 				w.Header().Set("Content-Type", "application/json")
 				w.Header().Set("X-Cache", "HIT")
 				w.WriteHeader(http.StatusOK)
@@ -90,6 +92,7 @@ func handleAnalyzeExperiment(repo experiments.Store, workerClient worker.Client,
 			_ = resultCache.Set(r.Context(), cacheKey, respBody, cache.AnalysisTTL)
 		}
 
+		metrics.AnalysisCacheResultsTotal.WithLabelValues("miss").Inc()
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("X-Cache", "MISS")
 		w.WriteHeader(status)

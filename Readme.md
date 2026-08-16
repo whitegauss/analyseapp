@@ -80,6 +80,12 @@ curl -X POST "$SUPABASE_URL/auth/v1/signup" \
 - `PATCH /api/v1/experiments/{id}/raw_data` — `{raw_data}` でデータ本体を丸ごと置き換え。成功するとこの実験のRedisキャッシュ済み解析結果（`analysis:{experiment_id}:*`）を全て無効化します（ベストエフォート。Redisに到達できない場合も更新自体は成功します）
 - `POST /api/v1/experiments/{id}/analyze` — `{type, params?}` を送信し、その実験の`raw_data`に対して解析を実行（例: `{"type":"linear_regression"}`）。Go APIが実験を取得したうえでPython Workerの`POST /analyze`に中継し、Workerのレスポンス（`{data, error, meta}`）をそのまま返します。Workerに到達できない場合は`502`（`worker_unreachable`）。成功した結果はRedisに24hキャッシュされ（`analysis:{experiment_id}:{type}:{params_hash}`、PDR.md §7）、レスポンスヘッダー`X-Cache: HIT`/`MISS`でキャッシュ命中を確認できます。キャッシュ命中時はDB・Worker呼び出し自体が発生しません。Redisに到達できない場合もキャッシュなしで通常通り動作します
 
+### セキュリティ・監視
+
+- `/api/v1`配下は接続元IP単位で100リクエスト/分にレート制限しています。超過すると`429`（`rate_limited`）が返ります（接続元IPはTCP接続自体から解決しており、リクエストヘッダーは信用していません。将来リバースプロキシを前段に置く場合は解決方法の見直しが必要です）
+- 全レスポンスに`X-Content-Type-Options`・`X-Frame-Options`・`Referrer-Policy`・`Strict-Transport-Security`のセキュリティヘッダーを付与しています（JSON APIのみのため`Content-Security-Policy`は設定していません）
+- `GET /metrics`でPrometheus形式のメトリクス（`http_requests_total`・`http_request_duration_seconds`をメソッド・ルートパターン・ステータスコード別に、`analysis_cache_results_total`を`/analyze`のキャッシュhit/miss別に）を公開しています。`/healthz`/`/readyz`と同様に認証なし・スクレイピングするPrometheusサーバー自体は未構築（本番運用時は外部公開しないようネットワーク側で制限してください）
+
 ## 実験データ入力・グラフ表示（フロントエンド）
 
 ログイン後、トップページ（`/`）に実験データ入力フォームが直接表示されます（別ページへの遷移は不要）。

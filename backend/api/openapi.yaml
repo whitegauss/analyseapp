@@ -11,6 +11,10 @@ info:
 
     Every response (success or error) is wrapped in the same envelope:
     `{data, error, meta}`.
+
+    `/api/v1` is rate-limited per client IP (100 requests/minute by default);
+    exceeding it returns `429` with error code `rate_limited` in the same
+    envelope.
 servers:
   - url: http://localhost:8080
     description: Local (docker compose)
@@ -18,6 +22,8 @@ servers:
 tags:
   - name: health
     description: Liveness/readiness probes (no auth)
+  - name: observability
+    description: Operational endpoints (no auth) — not part of the {data, error, meta} envelope
   - name: experiments
     description: Experiment CRUD (Supabase JWT required)
 
@@ -73,6 +79,25 @@ paths:
                     error: { code: db_unreachable, message: "..." }
                     meta: {}
 
+  /metrics:
+    get:
+      tags: [observability]
+      summary: Prometheus metrics
+      description: |
+        Prometheus text-exposition format (not the `{data, error, meta}`
+        envelope). Includes `http_requests_total`/`http_request_duration_seconds`
+        (labeled by method, matched route pattern, and status) and
+        `analysis_cache_results_total` (labeled `result=hit|miss`).
+        Unauthenticated, same as `/healthz`/`/readyz` — should be firewalled
+        off from the public internet in a real deployment.
+      responses:
+        "200":
+          description: Current metric values
+          content:
+            text/plain:
+              schema:
+                type: string
+
   /api/v1/experiments:
     post:
       tags: [experiments]
@@ -115,6 +140,8 @@ paths:
                 $ref: "#/components/schemas/Envelope"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -140,6 +167,8 @@ paths:
                           $ref: "#/components/schemas/Experiment"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -172,6 +201,8 @@ paths:
                 $ref: "#/components/schemas/Envelope"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
         "404":
           $ref: "#/components/responses/NotFound"
         "500":
@@ -209,6 +240,8 @@ paths:
                 $ref: "#/components/schemas/Envelope"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
         "404":
           $ref: "#/components/responses/NotFound"
         "500":
@@ -253,6 +286,8 @@ paths:
                 $ref: "#/components/schemas/Envelope"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
         "404":
           $ref: "#/components/responses/NotFound"
         "500":
@@ -303,6 +338,8 @@ paths:
                 $ref: "#/components/schemas/Envelope"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
         "404":
           $ref: "#/components/responses/NotFound"
         "500":
@@ -376,6 +413,8 @@ paths:
                 $ref: "#/components/schemas/Envelope"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
         "404":
           $ref: "#/components/responses/NotFound"
         "500":
@@ -437,6 +476,16 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/Envelope"
+    TooManyRequests:
+      description: Rate limit exceeded (100 requests/minute per client IP by default)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Envelope"
+          example:
+            data: null
+            error: { code: rate_limited, message: "too many requests, please slow down" }
+            meta: {}
 
   schemas:
     Envelope:
