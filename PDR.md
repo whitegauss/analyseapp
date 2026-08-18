@@ -9,11 +9,14 @@
 
 ### 機能要件
 
+- **プロジェクト単位での実験管理**（1つの実験テーマ＝1プロジェクト。プロジェクトの下に複数の実験データがぶら下がる）
+- **他プロジェクトの実験データの呼び出し（コピー）**
 - 線形グラフ、片対数グラフ、両対数グラフ
 - 非線形グラフ（拡張性を持たせる）
 - ログ変換
 - 軸ラベルの斜体・立体の区別、日本語・英語・ギリシャ語対応
 - 線形回帰などの解析機能
+- 複数実験の比較表示（同一グラフへの重ね描画）
 - データインポートの容易さ
 - 外部API対応（OfficeScript / VBA / GASからの呼び出し）※後回し
 - 角度→数値変換などの機能追加の可能性
@@ -88,9 +91,18 @@ erDiagram
         timestamp created_at
         timestamp last_used_at
     }
+    PROJECTS {
+        uuid id PK
+        uuid user_id FK
+        string title
+        string description
+        timestamp created_at
+        timestamp updated_at
+    }
     EXPERIMENTS {
         uuid id PK
         uuid user_id FK
+        uuid project_id FK
         string title
         jsonb raw_data
         jsonb config
@@ -105,9 +117,18 @@ erDiagram
         timestamp created_at
     }
     PROFILES ||--o{ API_KEYS : "has (1:N)"
-    PROFILES ||--o{ EXPERIMENTS : "creates (1:N)"
+    PROFILES ||--o{ PROJECTS : "creates (1:N)"
+    PROJECTS ||--o{ EXPERIMENTS : "contains (1:N)"
+    PROFILES ||--o{ EXPERIMENTS : "owns (1:N)"
     EXPERIMENTS ||--o{ ANALYSIS_RESULTS : "generates (1:N)"
 ```
+
+### プロジェクトと実験の関係（方針）
+
+- **1実験は必ず1プロジェクトに所属する（1:N）**。`experiments.project_id`は`NOT NULL`とし、多対多の中間テーブルは持たない（削除時の振る舞い・権限チェック・UIが複雑になるため、必要になるまで作らない）
+- `experiments.user_id`は`project_id`から辿れるため冗長だが、**認可チェックを1テーブルで完結させるために残す**（既存の`where id = $1 and user_id = $2`というクエリ形をJOIN無しで維持できる）。アプリ側で常に「実験のuser_id = 所属プロジェクトのuser_id」を保つ
+- **他プロジェクトの実験データは「コピー」で取り込む**（参照ではなく複製）。コピー後は完全に独立した実験レコードとなり、元データを編集しても複製先には影響しない。逆も同様
+- プロジェクト削除時は配下の実験も`ON DELETE CASCADE`で削除される（実験削除時に`analysis_results`が消えるのと同じ連鎖）
 
 ## 6. 描画方針：解析と描画の分離
 
@@ -151,18 +172,37 @@ analysis:{experiment_id}:{type}:{params_hash}  → 解析結果JSON
 **TTL方針**
 - 解析結果：実験データが不変なら長め（24h目安）。それ以上はDBに永続化し、Redisは直近アクセス分のみ保持
 
+**プロジェクト導入による影響**
+- キーは`experiment_id`起点のままとし、`project_id`はキーに含めない（実験IDは全体で一意で、実験は必ず1プロジェクトにしか属さないため、プロジェクトを足しても一意性は変わらない）
+- 実験のコピーは新しい`experiment_id`を発番するため、コピー元のキャッシュを引き継ぐことはなく、無効化も不要
+- プロジェクト削除で配下の実験がCASCADE削除された場合、対応するキャッシュキーは孤児として残るがTTLで自然に消える（`raw_data`更新時のような即時無効化は不要。消えた実験IDへのリクエストはDB側で404になり、キャッシュに到達しないため）
+
 ## 8. API設計（叩き台）
 
 外部API（GAS/VBA/OfficeScript）対応は後回しとするが、将来の拡張を見据えてレスポンスエンベロープと認証方式の型だけは先に固めておく。
 
 ```
-POST   /api/v1/experiments                  実験作成（生データ登録）
+GET    /api/v1/projects                          プロジェクト一覧
+POST   /api/v1/projects                          プロジェクト作成
+GET    /api/v1/projects/{id}                     プロジェクト取得
+PATCH  /api/v1/projects/{id}                     プロジェクト更新（タイトル・説明）
+DELETE /api/v1/projects/{id}                     プロジェクト削除（配下の実験ごと）
+
+GET    /api/v1/projects/{id}/experiments         プロジェクト配下の実験一覧
+POST   /api/v1/projects/{id}/experiments         実験作成（生データ登録）
+
+GET    /api/v1/experiments                       全実験一覧（プロジェクト横断、コピー元の選択用）
 GET    /api/v1/experiments/{id}
-PATCH  /api/v1/experiments/{id}/config       グラフ設定（軸ラベル等）更新
-POST   /api/v1/experiments/{id}/analyze      解析実行 {type: "linear_regression", ...}
-POST   /api/v1/convert                       汎用変換（角度→数値など）
+DELETE /api/v1/experiments/{id}
+PATCH  /api/v1/experiments/{id}/config           グラフ設定（軸ラベル等）更新
+PATCH  /api/v1/experiments/{id}/raw_data         データ本体の更新
+POST   /api/v1/experiments/{id}/copy             他プロジェクトへコピー {project_id}
+POST   /api/v1/experiments/{id}/analyze          解析実行 {type: "linear_regression", ...}
+POST   /api/v1/convert                           汎用変換（角度→数値など）
 ```
 
+- **コレクション操作（一覧・作成）はプロジェクト配下のネストしたパス、個々の実験に対する操作は`/experiments/{id}`のフラットなパス**という使い分けにする。実験IDは全体で一意なので、既存の`/experiments/{id}`系のパスは変更せずに済む
+- `GET /api/v1/experiments`（プロジェクト横断の全実験一覧）は、コピー元を選ぶUI・複数実験の比較UIのために残す
 - レスポンスは統一エンベロープ `{data, error, meta}`
 - 認証は将来的に2系統を想定：ブラウザ＝Supabase OAuth JWT、外部＝APIキー（`X-API-Key`）
 
