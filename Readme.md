@@ -63,6 +63,8 @@ docker compose down
 
 Go API GatewayのAPI構成は [backend/api/openapi.yaml](./backend/api/openapi.yaml)（OpenAPI 3.0 / Swagger）にまとめています。[Swagger Editor](https://editor.swagger.io/) 等に貼り付けると一覧・スキーマを確認できます。
 
+**プロジェクト機能への移行中**（2026-08-16〜、WORKLOG.md「【要件変更】プロジェクト機能の導入」参照）: `GET/POST/PATCH/DELETE /api/v1/projects`・`/api/v1/projects/{id}`は実装済みで動作しますが、まだ`experiments`とは接続されていません（`experiments.project_id`はStage 2で追加予定）。それまでは以下の`/api/v1/experiments`系がこれまで通りの唯一の実験操作手段です。
+
 `/api/v1/experiments`系のエンドポイントは全てSupabase AuthのJWT（`Authorization: Bearer <access_token>`）が必須です。curlで試す場合、Supabase AuthのREST APIでサインアップ/サインインしてトークンを取得できます。
 
 ```bash

@@ -15,6 +15,7 @@ import (
 	"analyseapp/api/internal/experiments"
 	"analyseapp/api/internal/logging"
 	"analyseapp/api/internal/metrics"
+	"analyseapp/api/internal/projects"
 	"analyseapp/api/internal/response"
 	"analyseapp/api/internal/worker"
 )
@@ -76,6 +77,13 @@ func NewRouter(dbPool *pgxpool.Pool, jwks keyfunc.Keyfunc, workerClient worker.C
 				r.Patch("/experiments/{id}/config", handleUpdateExperimentConfig(repo))
 				r.Patch("/experiments/{id}/raw_data", handleUpdateExperimentRawData(repo, resultCache))
 				r.Post("/experiments/{id}/analyze", handleAnalyzeExperiment(repo, workerClient, resultCache))
+
+				projectRepo := projects.NewRepository(dbPool)
+				r.Post("/projects", handleCreateProject(projectRepo))
+				r.Get("/projects", handleListProjects(projectRepo))
+				r.Get("/projects/{id}", handleGetProject(projectRepo))
+				r.Patch("/projects/{id}", handleUpdateProject(projectRepo))
+				r.Delete("/projects/{id}", handleDeleteProject(projectRepo))
 			}
 			// convert (PDR.md section 8) lands here in follow-up work.
 		})

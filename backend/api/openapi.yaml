@@ -24,6 +24,8 @@ tags:
     description: Liveness/readiness probes (no auth)
   - name: observability
     description: Operational endpoints (no auth) — not part of the {data, error, meta} envelope
+  - name: projects
+    description: Project CRUD (Supabase JWT required). Every experiment belongs to exactly one project.
   - name: experiments
     description: Experiment CRUD (Supabase JWT required)
 
@@ -97,6 +99,191 @@ paths:
             text/plain:
               schema:
                 type: string
+
+  /api/v1/projects:
+    post:
+      tags: [projects]
+      summary: Create a project
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateProjectRequest"
+            example:
+              title: "落下運動の実験"
+              description: "2026年度、力学実験レポート用"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Project"
+        "400":
+          description: Malformed body, or `title` missing/empty
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Envelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    get:
+      tags: [projects]
+      summary: List the authenticated user's projects
+      description: Most recently created first. No pagination yet.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: OK (possibly an empty array)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/Project"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/projects/{id}:
+    get:
+      tags: [projects]
+      summary: Get a project by id
+      description: Only returns projects owned by the authenticated user. Another user's id (or a nonexistent id) is indistinguishable and returns 404.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Project"
+        "400":
+          description: "`id` is not a valid UUID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Envelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    patch:
+      tags: [projects]
+      summary: Replace a project's title/description
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProjectRequest"
+            example:
+              title: "落下運動の実験"
+              description: "2026年度、力学実験レポート用"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Project"
+        "400":
+          description: Malformed body, or `title` missing/empty
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Envelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    delete:
+      tags: [projects]
+      summary: Delete a project
+      description: Only deletes projects owned by the authenticated user. Once experiments.project_id exists, experiments belonging to this project will be removed via an ON DELETE CASCADE foreign key.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          id:
+                            type: string
+                            format: uuid
+        "400":
+          description: "`id` is not a valid UUID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Envelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
 
   /api/v1/experiments:
     post:
@@ -448,6 +635,13 @@ components:
       schema:
         type: string
         format: uuid
+    ProjectId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
 
   responses:
     Unauthorized:
@@ -461,7 +655,7 @@ components:
             error: { code: unauthorized, message: "missing bearer token" }
             meta: {}
     NotFound:
-      description: Experiment not found (or not owned by the caller)
+      description: Resource not found (or not owned by the caller). The exact message varies by endpoint (e.g. "experiment not found", "project not found")
       content:
         application/json:
           schema:
@@ -540,6 +734,45 @@ components:
       example:
         x_axis_label: "時刻 $t$ (s)"
         y_axis_label: "速度 $v$ (m/s)"
+
+    Project:
+      type: object
+      description: Groups a user's experiments. Every experiment belongs to exactly one project.
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        description:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateProjectRequest:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+
+    UpdateProjectRequest:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+        description:
+          type: string
 
     Experiment:
       type: object
