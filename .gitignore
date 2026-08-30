@@ -13,6 +13,9 @@ __pycache__/
 *.pyc
 .venv/
 
+# Claude Code agent worktrees
+.claude/worktrees/
+
 # Test artifacts (scripts/test.sh)
 .test-logs/
 coverage/
