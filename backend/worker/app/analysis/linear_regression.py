@@ -19,6 +19,7 @@ from app.schemas import DataSeries
 
 
 def _require_column(data: DataSeries, name: str) -> list[float]:
+    """Extract a required column from the data series, raising an error if missing."""
     values = data.columns.get(name)
     if values is None:
         raise MissingColumnError(name)
@@ -27,6 +28,13 @@ def _require_column(data: DataSeries, name: str) -> list[float]:
 
 @register("linear_regression")
 def linear_regression(data: DataSeries, params: dict[str, Any]) -> dict[str, Any]:
+    """Perform ordinary or weighted least-squares linear regression.
+
+    Fits y = slope * x + intercept, optionally in log-transformed space if
+    params.x_log or params.y_log are True. If a y_error column is present,
+    performs inverse-variance weighted regression. Returns the fitted parameters,
+    their standard errors, R-squared, predicted values, and residuals.
+    """
     x = np.array(_require_column(data, "x"), dtype=float)
     y = np.array(_require_column(data, "y"), dtype=float)
 

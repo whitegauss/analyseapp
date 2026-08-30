@@ -11,6 +11,7 @@ from app.schemas import DataSeries
 
 
 def series(x: list[float], y: list[float], y_error: list[float] | None = None) -> DataSeries:
+    """Build a DataSeries from x, y, and optional y_error columns for testing."""
     columns: dict[str, list[float]] = {"x": list(x), "y": list(y)}
     if y_error is not None:
         columns["y_error"] = list(y_error)

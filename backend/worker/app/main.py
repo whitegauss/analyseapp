@@ -22,6 +22,11 @@ envelope.register_exception_handlers(app)
 
 @app.middleware("http")
 async def trace_and_log(request: Request, call_next):
+    """Middleware that adds distributed tracing support and logs request metrics.
+
+    Extracts or generates a trace ID, binds it to the request context, measures
+    request duration, and logs the completed request with status and timing.
+    """
     trace_id = request.headers.get("x-trace-id", str(uuid.uuid4()))
     structlog.contextvars.bind_contextvars(trace_id=trace_id)
 
@@ -43,11 +48,17 @@ async def trace_and_log(request: Request, call_next):
 
 @app.get("/healthz")
 async def healthz():
+    """Health check endpoint for container orchestration and monitoring."""
     return envelope.ok({"status": "ok"})
 
 
 @app.post("/analyze")
 async def analyze(req: AnalysisRequest):
+    """Execute a numeric analysis on the provided data series.
+
+    Dispatches to the appropriate analysis function based on the request type,
+    runs the analysis with the given parameters, and returns the result.
+    """
     result = analysis.run(req.type, req.data, req.params)
     log.info(
         "analysis run",

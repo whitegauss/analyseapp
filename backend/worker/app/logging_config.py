@@ -7,6 +7,11 @@ import structlog
 
 
 def configure_logging() -> None:
+    """Configure structured JSON logging for the worker application.
+
+    Sets up stdlib logging to output to stdout and configures structlog with
+    JSON rendering, timestamp and log level processors, and context variable merging.
+    """
     logging.basicConfig(format="%(message)s", stream=sys.stdout, level=logging.INFO)
 
     structlog.configure(
@@ -22,4 +27,5 @@ def configure_logging() -> None:
 
 
 def get_logger(name: str = "worker") -> structlog.stdlib.BoundLogger:
+    """Get a configured structlog logger instance with the given name."""
     return structlog.get_logger(name)

@@ -16,6 +16,7 @@ class DataSeries(BaseModel):
 
     @model_validator(mode="after")
     def check_equal_length(self) -> "DataSeries":
+        """Validate that all columns in the data series have the same length."""
         lengths = {name: len(values) for name, values in self.columns.items()}
         if len(set(lengths.values())) > 1:
             raise ValueError(f"columns must all have the same length, got {lengths}")
