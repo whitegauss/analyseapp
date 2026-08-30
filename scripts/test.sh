@@ -17,6 +17,12 @@ set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOG_DIR="$REPO_ROOT/.test-logs"
 MAX_FAIL_LINES="${MAX_FAIL_LINES:-80}"
+case "$MAX_FAIL_LINES" in
+  '' | *[!0-9]*)
+    echo "MAX_FAIL_LINES must be a non-negative integer; got '$MAX_FAIL_LINES'. Using 80." >&2
+    MAX_FAIL_LINES=80
+    ;;
+esac
 
 suite="all"
 full=0
@@ -49,7 +55,13 @@ fi
 
 failed_suites=()
 
-now_ms() { echo $(($(date +%s%N) / 1000000)); }
+# BSD/macOS date has no %N and emits a literal "N", so probe once and fall
+# back to whole seconds rather than producing garbage arithmetic.
+if date +%s%N 2>/dev/null | grep -qE '^[0-9]+$'; then
+  now_ms() { echo $(($(date +%s%N) / 1000000)); }
+else
+  now_ms() { echo $(($(date +%s) * 1000)); }
+fi
 elapsed_since() { local ms=$(($(now_ms) - $1)); printf '%d.%d' "$((ms / 1000))" "$(((ms % 1000) / 100))"; }
 
 # report <name> <exit_code> <summary> <elapsed> <full_log> [display_log]
