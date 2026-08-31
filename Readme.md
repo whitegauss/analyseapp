@@ -47,8 +47,33 @@ docker compose down
 
 `main`へのpush・PRで [.github/workflows/ci.yml](./.github/workflows/ci.yml) がフロントエンド/Go API/Python Workerを並列でlint・フォーマットチェック・テスト・ビルドします。
 
+### まとめて実行する
+
+```bash
+scripts/test.sh              # 3スタック全部。成功すると1スタック1行だけ出力する
+scripts/test.sh api          # 単一スタック（all | frontend | api | worker）
+scripts/test.sh --cov        # カバレッジ付き
+scripts/test.sh --full       # 失敗時の出力を省略せず全部出す
+```
+
+失敗したときは**失敗したスイートの出力だけ**を表示します（既定で末尾80行、`MAX_FAIL_LINES`で変更可）。全文は常に`.test-logs/<suite>.log`に残るので、切り詰められても失われません。いずれかのスイートが落ちると非ゼロで終了します。
+
+Python Workerは`WORKER_PYTHON`、`backend/worker/.venv/bin/python`、`python3`の順にインタープリターを探します。ローカルでは`backend/worker/.venv`を作っておくのが楽です。
+
+**現在のカバレッジ（2026-08-30 / `origin/main` @ 605cc65 時点）**
+
+| スタック | カバレッジ | 測り方 |
+| --- | --- | --- |
+| Go API | 50.2% | `go test -coverpkg=./...`（テストを持たないパッケージも分母に含める） |
+| フロントエンド | 22.01% | Vitest v8 / `coverage.include`（テストが読み込んだファイルだけでなく`app`・`components`・`lib`の全ファイルが分母） |
+| Python Worker | 99% | `pytest --cov=app` |
+
+閾値ゲートはまだ設定していません（KAN-36の作業中は数値が動き続けるため）。
+
+### スタックごとに実行する
+
 - フロントエンド: `cd frontend && npm install`
-  - テスト: `npm run test`（[Vitest](https://vitest.dev/)。`lib/pasteDataParsing.ts`の貼り付けデータパース、`components/AxisLabel.tsx`の`$...$`区切りロジック、`components/ExperimentChart.tsx`の有効数字丸めロジックなど、純粋関数のみを対象）
+  - テスト: `npm run test`（[Vitest](https://vitest.dev/)。`lib/pasteDataParsing.ts`の貼り付けデータパース、`components/AxisLabel.tsx`の`$...$`区切りロジック、`components/ExperimentChart.tsx`の有効数字丸めロジックなど、純粋関数のみを対象。コンポーネントのレンダリングは未カバー — `environment: "node"`のため）
   - Lint: `npm run lint`（ESLint / `eslint-config-next`）
   - フォーマット: `npm run format`で整形、`npm run format:check`でCIと同じチェックのみ（[Prettier](https://prettier.io/)、`.prettierrc.json`）
   - ビルド: `npx next build`
@@ -56,7 +81,7 @@ docker compose down
   - テスト: `go build ./... && go vet ./... && go test ./...`（`internal/response`のエンベロープ整形、`internal/httpserver`のハンドラー検証ロジックをfake store（`experiments.Store`インターフェース）でテスト。DBを要する`experiments.Repository`のSQL自体は今回未カバー）
   - Lint/フォーマット: [golangci-lint](https://golangci-lint.run/)（`.golangci.yml`）。`golangci-lint run ./...`でlint、`golangci-lint fmt ./...`でフォーマット（`--diff`で差分確認のみ）
 - Python Worker: `cd backend/worker && pip install -r requirements-dev.txt`
-  - テスト: `pytest`（`tests/test_linear_regression.py`が解析ロジック、`tests/test_main.py`がHTTP層・エラーエンベロープをカバー）
+  - テスト: `pytest`（`tests/test_linear_regression.py`が解析ロジック、`tests/test_main.py`がHTTP層・エラーエンベロープをカバー。設定は`pytest.ini`）
   - Lint/フォーマット: [Ruff](https://docs.astral.sh/ruff/)（`ruff.toml`）。`ruff check .`でlint、`ruff format .`でフォーマット（`--check`で差分確認のみ）
 
 ## API（experiments）
