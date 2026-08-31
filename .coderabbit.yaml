@@ -1,1 +1,42 @@
+# yaml-language-server: $schema=https://storage.googleapis.com/coderabbit_public_assets/schema.v2.json
 language: "ja-JP"
+
+reviews:
+  pre_merge_checks:
+    docstrings:
+      # Off rather than lowered.
+      #
+      # The check has no path scoping -- it counts every function the diff
+      # touches -- so on a test-focused PR it grades TestXxx functions and
+      # table-driven helpers, which Go and pytest conventions deliberately
+      # leave undocumented. On #8 it analysed 10 functions: 5 were TestXxx, 3
+      # were test helpers, and only 1 was production code (which did have a
+      # docstring). The threshold is unreachable by construction while KAN-36
+      # is in flight, and a permanently-red check teaches people to skim past
+      # the whole pre-merge panel.
+      #
+      # It was not merely noisy. The failing check triggered an auto-fix commit
+      # on #5 that added docstrings to six worker production files; the
+      # generated docstrings did not satisfy `ruff format --check` and broke
+      # CI on a PR that was otherwise green.
+      #
+      # Revisit once KAN-36 is done and PRs go back to being mostly production
+      # code -- at that point `warning` with a modest threshold is reasonable.
+      mode: "off"
+
+code_generation:
+  docstrings:
+    path_instructions:
+      # Guard against a repeat of the #5 breakage if someone triggers docstring
+      # generation by hand.
+      - path: "backend/worker/**/*.py"
+        instructions: |
+          Leave a blank line between a function's docstring and any nested def
+          or class that follows it. `ruff format --check` runs in CI and treats
+          the missing blank line as a formatting error, so a generated docstring
+          without it turns a green build red.
+      - path: "backend/api/**/*.go"
+        instructions: |
+          Start a doc comment with the identifier it documents, per Go
+          convention. Do not add doc comments to TestXxx functions or to test
+          helpers; their names carry the intent and gofmt does not require them.
