@@ -57,6 +57,18 @@ describe("parseColumnsField", () => {
     expect(parseColumnsField(value).ok).toBe(true);
   });
 
+  // Current behaviour, pinned rather than endorsed. The truthiness check never
+  // looks at the shape, so a string or an object passes and ends up inside a
+  // Record<string, number[]> — the returned type is a lie. Same root cause as
+  // the empty-array case above. Fixing this is KAN-61.
+  it.each([
+    ["x is a string", '{"x":"invalid","y":[1]}'],
+    ["x holds strings instead of numbers", '{"x":["a"],"y":[1]}'],
+    ["x is an object", '{"x":{"0":1},"y":[1]}'],
+  ])("today accepts a column map where %s", (_label, value) => {
+    expect(parseColumnsField(value).ok).toBe(true);
+  });
+
   // Current behaviour, pinned rather than endorsed. try/catch wraps only the
   // JSON.parse call, so reading .x off a parsed null throws a TypeError out of
   // the function instead of returning the friendly error. Fixing this is KAN-61.
