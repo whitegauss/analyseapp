@@ -1,33 +1,7 @@
 "use client";
 
 import katex from "katex";
-
-// Text wrapped in $...$ is rendered as KaTeX math (LaTeX's own italics/upright
-// rules apply, e.g. $v$ is italic, $\mathrm{m/s}$ is upright). Everything
-// outside $...$ is plain DOM text — this is also how Japanese ends up
-// upright, since KaTeX has no CJK font.
-const MATH_SEGMENT = /\$([^$]+)\$/g;
-
-export function parseSegments(
-  label: string,
-): { math: boolean; content: string }[] {
-  const segments: { math: boolean; content: string }[] = [];
-  let lastIndex = 0;
-  for (const match of label.matchAll(MATH_SEGMENT)) {
-    if (match.index > lastIndex) {
-      segments.push({
-        math: false,
-        content: label.slice(lastIndex, match.index),
-      });
-    }
-    segments.push({ math: true, content: match[1] });
-    lastIndex = match.index + match[0].length;
-  }
-  if (lastIndex < label.length) {
-    segments.push({ math: false, content: label.slice(lastIndex) });
-  }
-  return segments;
-}
+import { parseSegments } from "@/lib/mathText";
 
 function katexHtml(tex: string): string {
   try {
