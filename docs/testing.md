@@ -25,9 +25,9 @@ scripts/test.sh --full       # 失敗時の出力を省略しない
 
 ### Go
 
-ハンドラーは[インターフェース経由で依存を受け取る](architecture.md#依存を注入する境界テストが成立している理由)ので、DB も Redis も立てずに回る。フェイクは `internal/httpserver/fakes_test.go` にある。
+ハンドラーは[インターフェース経由で依存を受け取る](architecture.md#依存を注入する境界テストが成立している理由)ので、DB も Redis も立てずに回る。フェイクは `backend/api/internal/httpserver/fakes_test.go` にある。
 
-検証やエラー写像は `internal/httpserver/errors.go` / `validate.go` に純粋関数として出してある。**ハンドラー経由でしか踏めない分岐を作らないこと** — `writeExperimentError` はかつてカバレッジ 75% で、それは「500 になる分岐が一度も実行されていない」という意味だった。
+検証やエラー写像は `backend/api/internal/httpserver/errors.go` / `backend/api/internal/httpserver/validate.go` に純粋関数として出してある。**ハンドラー経由でしか踏めない分岐を作らないこと** — `writeExperimentError` はかつてカバレッジ 75% で、それは「500 になる分岐が一度も実行されていない」という意味だった。
 
 ### フロントエンド
 
