@@ -4,7 +4,9 @@ import { useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import type { Data } from "plotly.js";
 import ChartSkeleton from "./ChartSkeleton";
-import AxisLabel, { parseSegments } from "./AxisLabel";
+import AxisLabel from "./AxisLabel";
+import { parseSegments } from "@/lib/mathText";
+import { linearRange, logRange, ticksForLogRange } from "@/lib/chart/logScale";
 import { fetchRegression } from "@/app/experiments/actions";
 import {
   formatUncertainty,
@@ -48,34 +50,6 @@ function axisLayout(label: string, fallbackTitle: string, logScale: boolean) {
     // Minor ticks are a linear-axis-only touch.
     minor: logScale ? undefined : { ticks: "inside" as const, showgrid: false },
   };
-}
-
-// Tick positions/labels for the standard 1-2-5 log-scale series (..., 2, 5,
-// 10, 20, 50, 100, 200, 500, 1000, ...) covering [min, max] -- the usual
-// tick pattern in scientific plots. Plotly's own automatic tick selection
-// (dtick "D1"/"D2", or nticks) lands on this same set of values for a
-// multi-decade range, but its default label formatting truncates the
-// non-decade ticks (e.g. renders 500 as just "5", 20 as just "2") --
-// computing tickvals/ticktext explicitly sidesteps that formatting and
-// guarantees the label always matches the value.
-export function logTicks(
-  min: number,
-  max: number,
-): { tickvals: number[]; ticktext: string[] } {
-  if (!(min > 0) || !(max > 0) || min >= max) {
-    return { tickvals: [], ticktext: [] };
-  }
-  const startExp = Math.floor(Math.log10(min));
-  const endExp = Math.floor(Math.log10(max));
-  const tickvals: number[] = [];
-  for (let exp = startExp; exp <= endExp; exp++) {
-    for (const m of [1, 2, 5]) {
-      const v = m * Math.pow(10, exp);
-      if (v >= min && v <= max) tickvals.push(v);
-    }
-  }
-  const ticktext = tickvals.map((v) => Number(v.toPrecision(6)).toString());
-  return { tickvals, ticktext };
 }
 
 // Plotly legend/title text supports a small subset of HTML (<i>, <b>, etc.)
@@ -192,45 +166,19 @@ export default function ExperimentChart({
   // autorange would otherwise keep expanding to fit the line's own
   // endpoints, a circular chase that never settles at the frame boundary.
   const xRange: [number, number] | undefined = useMemo(() => {
-    if (x.length === 0) return undefined;
-    const min = Math.min(...x);
-    const max = Math.max(...x);
-    const pad = (max - min) * 0.05 || 1;
-    return [min - pad, max + pad];
+    return linearRange(x);
   }, [x]);
 
   // Same idea, but for a log-scaled x/y axis: Plotly interprets a log
   // axis's `range` as log10 of the displayed bounds (range [0, 2] means 1
   // to 100), and only positive values can appear on it at all.
-  const xRangeLog: [number, number] | undefined = useMemo(() => {
-    const positiveX = x.filter((v) => v > 0);
-    if (positiveX.length === 0) return undefined;
-    const logMin = Math.log10(Math.min(...positiveX));
-    const logMax = Math.log10(Math.max(...positiveX));
-    const pad = (logMax - logMin) * 0.05 || 0.5;
-    return [logMin - pad, logMax + pad];
-  }, [x]);
-
-  const yRangeLog: [number, number] | undefined = useMemo(() => {
-    const positiveY = y.filter((v) => v > 0);
-    if (positiveY.length === 0) return undefined;
-    const logMin = Math.log10(Math.min(...positiveY));
-    const logMax = Math.log10(Math.max(...positiveY));
-    const pad = (logMax - logMin) * 0.05 || 0.5;
-    return [logMin - pad, logMax + pad];
-  }, [y]);
+  const xRangeLog = useMemo(() => logRange(x), [x]);
+  const yRangeLog = useMemo(() => logRange(y), [y]);
 
   // logTicks needs real (non-log10) bounds; xRangeLog/yRangeLog are in
   // log10 units (see above), so convert back with 10^x.
-  const xLogTicks = useMemo(() => {
-    if (!xRangeLog) return undefined;
-    return logTicks(Math.pow(10, xRangeLog[0]), Math.pow(10, xRangeLog[1]));
-  }, [xRangeLog]);
-
-  const yLogTicks = useMemo(() => {
-    if (!yRangeLog) return undefined;
-    return logTicks(Math.pow(10, yRangeLog[0]), Math.pow(10, yRangeLog[1]));
-  }, [yRangeLog]);
+  const xLogTicks = useMemo(() => ticksForLogRange(xRangeLog), [xRangeLog]);
+  const yLogTicks = useMemo(() => ticksForLogRange(yRangeLog), [yRangeLog]);
 
   // The regression line's endpoints, as real (non-log) x values -- trace
   // data is always real values even on a log axis, only the `range` layout

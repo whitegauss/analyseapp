@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { LinearRegressionResult } from "@/lib/experiment";
-import {
-  evaluateModel,
-  formatModelEquation,
-  logTicks,
-} from "./ExperimentChart";
+import { evaluateModel, formatModelEquation } from "./ExperimentChart";
 
 function makeRegression(
   overrides: Partial<LinearRegressionResult>,
@@ -83,43 +79,5 @@ describe("formatModelEquation", () => {
     );
     expect(html).toContain("log₁₀(<i>y</i>)");
     expect(html).toContain("log₁₀(<i>x</i>)");
-  });
-});
-
-describe("logTicks", () => {
-  it("places ticks at the 1-2-5 series within a single decade", () => {
-    const { tickvals } = logTicks(1, 9);
-    expect(tickvals).toEqual([1, 2, 5]);
-  });
-
-  it("labels every tick with its full, untruncated value (no dropped zeros)", () => {
-    const { tickvals, ticktext } = logTicks(2, 1000);
-    const asPairs = Object.fromEntries(
-      tickvals.map((v, i) => [v, ticktext[i]]),
-    );
-    expect(asPairs[2]).toBe("2");
-    expect(asPairs[5]).toBe("5");
-    expect(asPairs[20]).toBe("20");
-    expect(asPairs[50]).toBe("50");
-    expect(asPairs[100]).toBe("100");
-    expect(asPairs[200]).toBe("200");
-    expect(asPairs[500]).toBe("500");
-    expect(asPairs[1000]).toBe("1000");
-  });
-
-  it("spans multiple decades with the 1-2-5 series repeated in each", () => {
-    const { tickvals } = logTicks(1, 1000);
-    expect(tickvals).toEqual([1, 2, 5, 10, 20, 50, 100, 200, 500, 1000]);
-  });
-
-  it("excludes ticks outside the given bounds", () => {
-    const { tickvals } = logTicks(3, 40);
-    expect(tickvals).toEqual([5, 10, 20]);
-  });
-
-  it("returns empty arrays for non-positive or inverted bounds", () => {
-    expect(logTicks(0, 100)).toEqual({ tickvals: [], ticktext: [] });
-    expect(logTicks(-5, 100)).toEqual({ tickvals: [], ticktext: [] });
-    expect(logTicks(100, 1)).toEqual({ tickvals: [], ticktext: [] });
   });
 });
