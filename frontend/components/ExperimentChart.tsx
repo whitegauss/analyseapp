@@ -5,8 +5,15 @@ import dynamic from "next/dynamic";
 import type { Data } from "plotly.js";
 import ChartSkeleton from "./ChartSkeleton";
 import AxisLabel from "./AxisLabel";
-import { parseSegments } from "@/lib/mathText";
 import { linearRange, logRange, ticksForLogRange } from "@/lib/chart/logScale";
+import { axisLayout } from "@/lib/chart/axisLayout";
+import {
+  evaluateModel,
+  formatModelEquation,
+  formatSigned,
+  regressionCacheKey,
+  uncertaintyBoundsAt,
+} from "@/lib/chart/regression";
 import { fetchRegression } from "@/app/experiments/actions";
 import {
   formatUncertainty,
@@ -35,97 +42,6 @@ type Props = {
   // actually switches a checkbox on.
   initialRegression?: LinearRegressionResult | null;
 };
-
-function axisLayout(label: string, fallbackTitle: string, logScale: boolean) {
-  return {
-    title: { text: label.trim() ? "" : fallbackTitle },
-    type: logScale ? ("log" as const) : ("linear" as const),
-    showgrid: false,
-    zeroline: false,
-    showline: true,
-    mirror: true,
-    ticks: "inside" as const,
-    // A log axis gets explicit tickvals/ticktext (see logTicks) instead --
-    // an extra minor-tick layer would just add more, unlabeled clutter.
-    // Minor ticks are a linear-axis-only touch.
-    minor: logScale ? undefined : { ticks: "inside" as const, showgrid: false },
-  };
-}
-
-// Plotly legend/title text supports a small subset of HTML (<i>, <b>, etc.)
-// but not KaTeX. This reuses AxisLabel's exact $...$ parsing so authoring
-// stays consistent with the axis labels, and approximates the math styling
-// with Plotly's native italics instead of true KaTeX typesetting.
-function mathItalicHtml(text: string): string {
-  return parseSegments(text)
-    .map((seg) => (seg.math ? `<i>${seg.content}</i>` : seg.content))
-    .join("");
-}
-
-function formatSigned(value: number, decimals: number): string {
-  const sign = value < 0 ? "-" : "+";
-  return `${sign} ${Math.abs(value).toFixed(decimals)}`;
-}
-
-// A non-positive/non-finite stderr is treated as exactly zero uncertainty
-// (see formatUncertainty above) rather than skipping the band entirely.
-function safeStderr(stderr: number): number {
-  return Number.isFinite(stderr) && stderr > 0 ? stderr : 0;
-}
-
-function formatSignedWithUncertainty(
-  value: number,
-  decimals: number,
-  uncertainty: number,
-): string {
-  const sign = value < 0 ? "-" : "+";
-  return `${sign} (${Math.abs(value).toFixed(decimals)} ± ${formatUncertainty(uncertainty)})`;
-}
-
-// Evaluates the fitted model at a real (never-transformed) x value,
-// returning a real (never-transformed) y value -- i.e. this undoes whatever
-// log10 transform the fit was computed under, so the result can be plotted
-// directly regardless of axis scale. xLog/yLog must match what the
-// regression was actually fit with (LinearRegressionResult.x_log/y_log).
-export function evaluateModel(
-  regression: LinearRegressionResult,
-  xValue: number,
-  xLog: boolean,
-  yLog: boolean,
-): number {
-  const xFit = xLog ? Math.log10(xValue) : xValue;
-  const yFit = regression.slope * xFit + regression.intercept;
-  return yLog ? Math.pow(10, yFit) : yFit;
-}
-
-// Builds the legend text for the fit line, in whichever of the 4
-// linear/semi-log/log-log forms the regression was actually fit under
-// (LinearRegressionResult.x_log/y_log) -- e.g. y = ax + b, or
-// log10(y) = a*log10(x) + b for a log-log (power-law) fit.
-export function formatModelEquation(
-  regression: LinearRegressionResult,
-): string {
-  const { x_log: xLog, y_log: yLog } = regression;
-  const slope = roundToUncertainty(regression.slope, regression.slope_stderr);
-  const intercept = roundToUncertainty(
-    regression.intercept,
-    regression.intercept_stderr,
-  );
-  const slopeTerm = `(${slope.rounded.toFixed(slope.decimals)} ± ${formatUncertainty(regression.slope_stderr)})`;
-  const interceptTerm = formatSignedWithUncertainty(
-    intercept.rounded,
-    intercept.decimals,
-    regression.intercept_stderr,
-  );
-  const lhs = yLog ? "log₁₀($y$)" : "$y$";
-  const xTerm = xLog ? "log₁₀($x$)" : "$x$";
-  const equation = `${lhs} = ${slopeTerm}${xTerm} ${interceptTerm}`;
-  return mathItalicHtml(equation);
-}
-
-function regressionCacheKey(xLog: boolean, yLog: boolean): string {
-  return `${xLog}:${yLog}`;
-}
 
 export default function ExperimentChart({
   columns,
@@ -257,27 +173,8 @@ export default function ExperimentChart({
   const regressionBand: Partial<Data>[] | null = useMemo(() => {
     if (!activeRegression || !showRegression || !lineXBounds) return null;
     const [lineXMin, lineXMax] = lineXBounds;
-    const slopeErr = safeStderr(activeRegression.slope_stderr);
-    const interceptErr = safeStderr(activeRegression.intercept_stderr);
-
-    const boundsAt = (xv: number) => {
-      const xFit = xLogScale ? Math.log10(xv) : xv;
-      const candidates = [
-        (activeRegression.slope + slopeErr) * xFit +
-          (activeRegression.intercept + interceptErr),
-        (activeRegression.slope + slopeErr) * xFit +
-          (activeRegression.intercept - interceptErr),
-        (activeRegression.slope - slopeErr) * xFit +
-          (activeRegression.intercept + interceptErr),
-        (activeRegression.slope - slopeErr) * xFit +
-          (activeRegression.intercept - interceptErr),
-      ];
-      const lowerFit = Math.min(...candidates);
-      const upperFit = Math.max(...candidates);
-      return yLogScale
-        ? { lower: Math.pow(10, lowerFit), upper: Math.pow(10, upperFit) }
-        : { lower: lowerFit, upper: upperFit };
-    };
+    const boundsAt = (xv: number) =>
+      uncertaintyBoundsAt(activeRegression, xv, xLogScale, yLogScale);
     const atMin = boundsAt(lineXMin);
     const atMax = boundsAt(lineXMax);
 
