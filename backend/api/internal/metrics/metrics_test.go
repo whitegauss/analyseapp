@@ -48,3 +48,28 @@ func TestHandler_ServesPrometheusExpositionFormat(t *testing.T) {
 		t.Errorf("Content-Type = %q, want text/plain (Prometheus exposition format)", ct)
 	}
 }
+
+func TestMiddleware_RecordsNothingWhenTheHandlerPanics(t *testing.T) {
+	// Middleware records after next.ServeHTTP returns, without a defer, so a
+	// panic skips both the counter and the histogram. chi's Recoverer is
+	// mounted *outside* it (router.go), so the client still gets a 500 while
+	// the request appears in no metric. Pinning it; a defer would be the fix.
+	r := chi.NewRouter()
+	r.Use(Middleware)
+	r.Get("/panics/{id}", func(w http.ResponseWriter, r *http.Request) { panic("boom") })
+
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Error("the panic did not reach the caller, so Middleware now recovers it")
+			}
+		}()
+		r.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/panics/1", nil))
+	}()
+
+	rec := httptest.NewRecorder()
+	Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/metrics", nil))
+	if body := rec.Body.String(); strings.Contains(body, "/panics/{id}") {
+		t.Errorf("metrics now record panicking requests; update this test and drop the note above:\n%s", body)
+	}
+}
