@@ -20,6 +20,7 @@ def register(name: str):
     Usage: @register("analysis_type_name") above an analysis function that
     takes (DataSeries, dict) and returns a result dict.
     """
+
     def decorator(fn: AnalysisFunc) -> AnalysisFunc:
         """Register the decorated function in the analysis registry."""
         REGISTRY[name] = fn

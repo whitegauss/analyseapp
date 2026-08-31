@@ -27,6 +27,7 @@ def register_exception_handlers(app: FastAPI) -> None:
     Catches AnalysisError and RequestValidationError exceptions and returns them
     as structured error envelopes with appropriate HTTP status codes.
     """
+
     @app.exception_handler(AnalysisError)
     async def handle_analysis_error(request: Request, exc: AnalysisError):
         """Handle analysis-specific errors with a 400 Bad Request response."""
