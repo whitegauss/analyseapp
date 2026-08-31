@@ -15,7 +15,14 @@ REGISTRY: dict[str, AnalysisFunc] = {}
 
 
 def register(name: str):
+    """Decorator to register an analysis function in the global registry.
+
+    Usage: @register("analysis_type_name") above an analysis function that
+    takes (DataSeries, dict) and returns a result dict.
+    """
+
     def decorator(fn: AnalysisFunc) -> AnalysisFunc:
+        """Register the decorated function in the analysis registry."""
         REGISTRY[name] = fn
         return fn
 
@@ -46,6 +53,11 @@ class InsufficientDataError(AnalysisError):
 
 
 def run(type_: str, data: DataSeries, params: dict[str, Any]) -> dict[str, Any]:
+    """Look up and execute the analysis function for the given type.
+
+    Dispatches to the registered handler for the requested analysis type,
+    passing the data and parameters, and returns the analysis result.
+    """
     fn = REGISTRY.get(type_)
     if fn is None:
         raise UnknownAnalysisTypeError(f"unsupported analysis type: {type_}")
