@@ -4,6 +4,17 @@
 
 実験データの解析（グラフ化・回帰分析など）を簡単に行うためのWebアプリ。設計の詳細は [PDR.md](./PDR.md) を参照。
 
+## ドキュメント
+
+| 読みたいもの | 場所 |
+| --- | --- |
+| なぜこれを作るのか、何を目指すのか | [PDR.md](./PDR.md) |
+| 動かし方、機能の使い方、API の仕様 | この Readme |
+| コードがどう分かれているか、なぜそう分かれているか | [docs/architecture.md](./docs/architecture.md) |
+| テストの書き方とこの repo 固有の約束事 | [docs/testing.md](./docs/testing.md) |
+
+**テストを触る前に [docs/testing.md の「現状固定テスト」](./docs/testing.md#現状固定テスト)を読むこと。** 既知のバグは「いまの壊れた挙動」をテストで固定してあるので、バグを直すとテストが赤くなる。それは成功のしるしであって、修正を戻す理由ではない。
+
 ## 技術スタック
 - **API Gateway/BFF**: Go（[go-chi](https://github.com/go-chi/chi) + [zerolog](https://github.com/rs/zerolog)）
 - **解析ワーカー**: Python（FastAPI + structlog + numpy、将来的にgRPC常駐プロセス化を予定）
