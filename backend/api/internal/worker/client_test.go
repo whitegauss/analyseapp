@@ -182,8 +182,10 @@ func TestHTTPClientAnalyzeFailures(t *testing.T) {
 	})
 
 	t.Run("a truncated response body discards the status code as well", func(t *testing.T) {
-		// The status is known before the body is read, but a read failure drops
-		// it and returns 0 -- so this 200 reaches the caller as a 502.
+		// Pinned rather than endorsed: the status is known before the body is
+		// read, but a read failure drops it and returns 0 -- so this 200 reaches
+		// the caller as a 502, and the logs blame an unreachable worker.
+		// Distinguishing the two is KAN-63.
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Length", "100")
 			w.WriteHeader(http.StatusOK)

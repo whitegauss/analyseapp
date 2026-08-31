@@ -77,7 +77,10 @@ func TestRedisCacheDeleteByPrefix(t *testing.T) {
 		{name: "no match is not an error and deletes nothing", prefix: "analysis:exp-9:", wantRemain: keys},
 		// The prefix gets "*" appended and goes to SCAN MATCH, so an empty one
 		// matches everything: a whole-cache flush that nothing here rejects.
-		{name: "an empty prefix deletes the entire database", prefix: "", wantRemain: nil},
+		// Pinned rather than endorsed: prefix is concatenated straight into a
+		// glob, so "" becomes MATCH "*". Rejecting it is KAN-68; this case
+		// flips to "returns an error and deletes nothing" then.
+		{name: "an empty prefix deletes the entire database (KAN-68)", prefix: "", wantRemain: nil},
 	}
 
 	for _, tt := range tests {

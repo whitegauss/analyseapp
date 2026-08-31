@@ -36,7 +36,10 @@ func TestStoreErrorResponse(t *testing.T) {
 		// Sentinels are compared with ==, so a wrapped ErrNotFound is a 500
 		// even though errors.Is would match it. No store wraps it today;
 		// pinned so that switching to errors.Is stays a deliberate change.
-		{name: "a wrapped sentinel is not recognized", err: fmt.Errorf("query: %w", experiments.ErrNotFound),
+		// Pinned rather than endorsed: the comparison is ==, not errors.Is, so
+		// adding context to the error silently turns a 404 into a 500.
+		// Switching to errors.Is is KAN-66; this case flips to 404 then.
+		{name: "a wrapped sentinel is not recognized (KAN-66)", err: fmt.Errorf("query: %w", experiments.ErrNotFound),
 			res: experimentResource, failedTo: "get experiment", wantStatus: 500, wantCode: "internal_error", wantMessage: "failed to get experiment"},
 		// Callers only reach this function with a non-nil error; falling
 		// through to 500 is the safe direction, so pin it.
