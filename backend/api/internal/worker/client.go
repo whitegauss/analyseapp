@@ -24,8 +24,15 @@ type HTTPClient struct {
 	HTTP    *http.Client
 }
 
+// analyzeURL joins the worker's base URL with the /analyze path. BaseURL comes
+// from WORKER_BASE_URL and may or may not carry a trailing slash, so trailing
+// slashes are trimmed to keep both spellings pointing at the same endpoint.
+func analyzeURL(baseURL string) string {
+	return strings.TrimRight(baseURL, "/") + "/analyze"
+}
+
 func (c *HTTPClient) Analyze(ctx context.Context, traceID string, body []byte) (int, []byte, error) {
-	url := strings.TrimRight(c.BaseURL, "/") + "/analyze"
+	url := analyzeURL(c.BaseURL)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return 0, nil, err
