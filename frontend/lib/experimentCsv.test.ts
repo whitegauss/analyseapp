@@ -184,4 +184,24 @@ describe("contentDispositionValue", () => {
       "filename*=UTF-8''a%20b.csv",
     );
   });
+
+  // encodeURIComponent leaves these alone, but RFC 8187's attr-char set does
+  // not include them. The apostrophe matters most: ext-value is
+  // charset'language'value, so a bare ' hands a strict parser a third
+  // delimiter.
+  it.each([
+    ["an apostrophe", "a'b.csv", "a%27b.csv"],
+    ["parentheses", "実験(1).csv", "%E5%AE%9F%E9%A8%93%281%29.csv"],
+    ["an asterisk", "star*.csv", "star%2A.csv"],
+  ])("percent-encodes %s, which attr-char excludes", (_l, name, want) => {
+    expect(contentDispositionValue(name)).toContain(`filename*=UTF-8''${want}`);
+  });
+
+  // Both are in attr-char, so encoding them would be needless noise.
+  it.each([
+    ["an exclamation mark", "ok!.csv"],
+    ["a tilde", "a~b.csv"],
+  ])("leaves %s unencoded, since attr-char allows it", (_label, name) => {
+    expect(contentDispositionValue(name)).toContain(`filename*=UTF-8''${name}`);
+  });
 });

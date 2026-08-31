@@ -77,14 +77,29 @@ export function csvFilename(title: string | null, id: string): string {
 }
 
 /**
+ * Percent-encodes a filename for the RFC 8187 `filename*` parameter.
+ *
+ * encodeURIComponent leaves `!'()*~` alone, but only `!` and `~` are in that
+ * spec's attr-char set. The apostrophe is the dangerous one: ext-value is
+ * `charset'language'value`, so a literal `'` in the name gives a strict parser
+ * a third delimiter to trip over.
+ */
+function encodeExtValue(filename: string): string {
+  return encodeURIComponent(filename).replace(
+    /['()*]/g,
+    (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+}
+
+/**
  * Builds the Content-Disposition value, giving the same name twice: a
- * plain-ASCII `filename` that every client can parse, and the RFC 5987
+ * plain-ASCII `filename` that every client can parse, and the RFC 8187
  * `filename*` that carries the real, possibly non-ASCII, name.
  */
 export function contentDispositionValue(filename: string): string {
   const asciiFallback = filename.replace(/[^\x20-\x7E]/g, "_");
   return (
     `attachment; filename="${asciiFallback}"; ` +
-    `filename*=UTF-8''${encodeURIComponent(filename)}`
+    `filename*=UTF-8''${encodeExtValue(filename)}`
   );
 }
