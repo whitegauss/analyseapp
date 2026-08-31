@@ -3,6 +3,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -49,37 +50,63 @@ func NewJWKS(ctx context.Context, supabaseURL string) (keyfunc.Keyfunc, error) {
 func Middleware(jwks keyfunc.Keyfunc) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			authHeader := r.Header.Get("Authorization")
-			tokenString, ok := strings.CutPrefix(authHeader, "Bearer ")
-			if !ok || tokenString == "" {
-				response.WriteError(w, http.StatusUnauthorized, "unauthorized", "missing bearer token")
+			tokenString, err := parseBearer(r.Header.Get("Authorization"))
+			if err != nil {
+				response.WriteError(w, http.StatusUnauthorized, "unauthorized", err.Error())
 				return
 			}
 
 			claims := jwt.MapClaims{}
-			_, err := jwt.ParseWithClaims(tokenString, claims, jwks.Keyfunc)
-			if err != nil {
+			if _, err := jwt.ParseWithClaims(tokenString, claims, jwks.Keyfunc); err != nil {
 				response.WriteError(w, http.StatusUnauthorized, "unauthorized", "invalid token: "+err.Error())
 				return
 			}
 
-			role, _ := claims["role"].(string)
-			if role != "authenticated" {
-				response.WriteError(w, http.StatusUnauthorized, "unauthorized", "token is not an authenticated-user token")
-				return
-			}
-
-			sub, _ := claims["sub"].(string)
-			userID, err := uuid.Parse(sub)
+			userID, err := userIDFromClaims(claims)
 			if err != nil {
-				response.WriteError(w, http.StatusUnauthorized, "unauthorized", "invalid sub claim")
+				response.WriteError(w, http.StatusUnauthorized, "unauthorized", err.Error())
 				return
 			}
 
-			ctx := context.WithValue(r.Context(), userIDKey, userID)
-			next.ServeHTTP(w, r.WithContext(ctx))
+			next.ServeHTTP(w, r.WithContext(WithUserID(r.Context(), userID)))
 		})
 	}
+}
+
+// Rejection reasons. These are written verbatim into the 401 response body, so
+// they must stay free of anything derived from the token itself.
+var (
+	errMissingBearer = errors.New("missing bearer token")
+	errNotUserToken  = errors.New("token is not an authenticated-user token")
+	errInvalidSub    = errors.New("invalid sub claim")
+)
+
+// parseBearer extracts the token from an Authorization header value. A header
+// that is absent, uses another scheme, or carries an empty token is rejected
+// the same way, so a caller cannot probe which of the three it hit.
+func parseBearer(authHeader string) (string, error) {
+	token, ok := strings.CutPrefix(authHeader, "Bearer ")
+	if !ok || token == "" {
+		return "", errMissingBearer
+	}
+	return token, nil
+}
+
+// userIDFromClaims applies the authorization rules to already-verified claims:
+// the token must belong to a signed-in end user (not the anon or service-role
+// key), and its subject must be a real user id.
+func userIDFromClaims(claims jwt.MapClaims) (uuid.UUID, error) {
+	role, _ := claims["role"].(string)
+	if role != "authenticated" {
+		return uuid.Nil, errNotUserToken
+	}
+
+	sub, _ := claims["sub"].(string)
+	userID, err := uuid.Parse(sub)
+	if err != nil {
+		return uuid.Nil, errInvalidSub
+	}
+	return userID, nil
 }
 
 func wrapJWKSErr(supabaseURL string, err error) error {

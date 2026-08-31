@@ -12,3 +12,13 @@ backend/api/api
 __pycache__/
 *.pyc
 .venv/
+
+# Claude Code agent worktrees
+.claude/worktrees/
+
+# Test artifacts (scripts/test.sh)
+.test-logs/
+coverage/
+.coverage
+.pytest_cache/
+*.coverprofile
