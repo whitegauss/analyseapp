@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic";
 import type { Data } from "plotly.js";
 import ChartSkeleton from "./ChartSkeleton";
-import type { LinearRegressionResult } from "./ExperimentChart";
+import type { LinearRegressionResult } from "@/lib/experiment";
 
 const Plot = dynamic(() => import("react-plotly.js"), {
   ssr: false,

@@ -1,5 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import { callGoApi, GoApiError } from "@/lib/api";
+import { readAxisLabel } from "@/lib/experiment";
 import { fetchRegression } from "@/app/experiments/actions";
 import ExperimentChart from "@/components/ExperimentChart";
 import AxisLabelEditor from "@/components/AxisLabelEditor";
@@ -15,11 +16,6 @@ type Experiment = {
   config: Record<string, unknown>;
   created_at: string;
 };
-
-function readAxisLabel(config: Record<string, unknown>, key: string): string {
-  const label = config[key];
-  return typeof label === "string" ? label : "";
-}
 
 export default async function ExperimentPage({
   params,

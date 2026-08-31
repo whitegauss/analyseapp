@@ -4,7 +4,8 @@ import { fetchRegression } from "@/app/experiments/actions";
 import ComparisonChart, {
   type ComparedExperiment,
 } from "@/components/ComparisonChart";
-import type { LinearRegressionResult } from "@/components/ExperimentChart";
+import { readAxisLabel, type LinearRegressionResult } from "@/lib/experiment";
+import { parseCompareIds } from "@/lib/compareParams";
 import CenteredCard from "@/components/CenteredCard";
 
 export const dynamic = "force-dynamic";
@@ -16,21 +17,13 @@ type Experiment = {
   config: Record<string, unknown>;
 };
 
-function readAxisLabel(config: Record<string, unknown>, key: string): string {
-  const label = config[key];
-  return typeof label === "string" ? label : "";
-}
-
 export default async function ComparePage({
   searchParams,
 }: {
   searchParams: Promise<{ ids?: string }>;
 }) {
   const { ids: idsParam } = await searchParams;
-  const ids = (idsParam ?? "")
-    .split(",")
-    .map((id) => id.trim())
-    .filter(Boolean);
+  const ids = parseCompareIds(idsParam);
 
   if (ids.length < 2) {
     redirect("/experiments");

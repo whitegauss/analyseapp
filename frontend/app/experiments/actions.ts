@@ -2,28 +2,10 @@
 
 import { redirect } from "next/navigation";
 import { callGoApi, GoApiError } from "@/lib/api";
-import type { LinearRegressionResult } from "@/components/ExperimentChart";
+import type { LinearRegressionResult } from "@/lib/experiment";
+import { parseColumnsField } from "@/lib/experimentForm";
 
 type Experiment = { id: string };
-
-type ParsedColumnsResult =
-  | { ok: true; columns: Record<string, number[]> }
-  | { ok: false; error: string };
-
-function parseColumnsField(
-  value: FormDataEntryValue | null,
-): ParsedColumnsResult {
-  let columns: Record<string, number[]>;
-  try {
-    columns = JSON.parse(String(value ?? ""));
-  } catch {
-    return { ok: false, error: "データが正しく貼り付けられていません" };
-  }
-  if (!columns.x || !columns.y) {
-    return { ok: false, error: "x列とy列のデータが必要です" };
-  }
-  return { ok: true, columns };
-}
 
 // Shared by every form action below that calls the Go API and then either
 // redirects (success, or /login when there's no session) or surfaces the
