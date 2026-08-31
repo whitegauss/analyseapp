@@ -196,3 +196,20 @@ func TestHTTPClientAnalyzeFailures(t *testing.T) {
 		assertNoResponse(t, status, respBody, err)
 	})
 }
+
+// Current behaviour, pinned rather than endorsed. HTTPClient's fields are
+// exported, so a caller can build one without HTTP and Analyze then dereferences
+// nil. Only cmd/api constructs it today and always sets the field, and chi's
+// Recoverer turns the panic into a 500 rather than killing the process -- so
+// this is a latent contract gap, not a live fault. Giving it a real error is
+// KAN-64.
+func TestAnalyzePanicsWhenHTTPClientIsMissing(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Error("Analyze returned normally; it panics today, so KAN-64 may be fixed")
+		}
+	}()
+
+	c := &HTTPClient{BaseURL: "http://worker.invalid"}
+	_, _, _ = c.Analyze(context.Background(), "trace-1", []byte(`{}`))
+}
