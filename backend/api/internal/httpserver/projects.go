@@ -17,18 +17,6 @@ type updateProjectRequest struct {
 	Description string `json:"description"`
 }
 
-// writeProjectError maps a projects.Store error to the right HTTP response:
-// 404 for ErrNotFound (never distinguishes "doesn't exist" from "not
-// yours", so ownership isn't leaked), 500 otherwise. failedTo completes the
-// message "failed to <failedTo>" (e.g. "get project").
-func writeProjectError(w http.ResponseWriter, err error, failedTo string) {
-	if err == projects.ErrNotFound {
-		response.WriteError(w, http.StatusNotFound, "not_found", "project not found")
-		return
-	}
-	response.WriteError(w, http.StatusInternalServerError, "internal_error", "failed to "+failedTo)
-}
-
 func handleCreateProject(repo projects.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID, ok := requireUserID(w, r)
