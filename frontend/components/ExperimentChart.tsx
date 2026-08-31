@@ -10,6 +10,7 @@ import {
   formatUncertainty,
   roundToUncertainty,
 } from "@/lib/significantFigures";
+import type { LinearRegressionResult } from "@/lib/experiment";
 
 // plotly.js touches `window`, so it can only load in the browser. While the
 // library itself is being fetched, show the same skeleton used for "no data
@@ -18,17 +19,6 @@ const Plot = dynamic(() => import("react-plotly.js"), {
   ssr: false,
   loading: () => <ChartSkeleton />,
 });
-
-export type LinearRegressionResult = {
-  slope: number;
-  intercept: number;
-  slope_stderr: number;
-  intercept_stderr: number;
-  r_squared: number;
-  weighted: boolean;
-  x_log: boolean;
-  y_log: boolean;
-};
 
 type Props = {
   columns: Record<string, number[]>;

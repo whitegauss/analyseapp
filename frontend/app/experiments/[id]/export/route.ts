@@ -3,7 +3,7 @@ import { callGoApi, GoApiError } from "@/lib/api";
 import { fetchRegression } from "@/app/experiments/actions";
 import { buildCsvRow } from "@/lib/csv";
 import { orderedColumnKeys } from "@/lib/columns";
-import type { LinearRegressionResult } from "@/components/ExperimentChart";
+import { readAxisLabel, type LinearRegressionResult } from "@/lib/experiment";
 
 type Experiment = {
   id: string;
@@ -12,11 +12,6 @@ type Experiment = {
   config: Record<string, unknown>;
   created_at: string;
 };
-
-function readAxisLabel(config: Record<string, unknown>, key: string): string {
-  const label = config[key];
-  return typeof label === "string" ? label : "";
-}
 
 function buildCsv(
   experiment: Experiment,

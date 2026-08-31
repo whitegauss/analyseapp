@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
+import type { LinearRegressionResult } from "@/lib/experiment";
 import {
   evaluateModel,
   formatModelEquation,
   logTicks,
-  type LinearRegressionResult,
 } from "./ExperimentChart";
 
 function makeRegression(
