@@ -2,6 +2,7 @@ package cache
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"testing"
@@ -66,28 +67,41 @@ func TestRedisCacheSetAndGet(t *testing.T) {
 func TestRedisCacheDeleteByPrefix(t *testing.T) {
 	// Sorted, since miniredis.Keys() returns its keys sorted.
 	keys := []string{"analysis:exp-1:corr:h2", "analysis:exp-1:lr:h1", "analysis:exp-2:lr:h3", "session:abc"}
+	// A key set where the prefixes below are only safe if they are matched
+	// literally: as globs, "?" and "[1]" and "*" each reach the sibling keys.
+	globKeys := []string{"analysis:*:lr:h9", "analysis:a", "analysis:b", `analysis:\x`, "analysis:[1]", "analysis:1", "analysis:zzz:x"}
 
 	tests := []struct {
 		name, prefix string
+		keys         []string
 		wantRemain   []string
+		wantErr      error
 	}{
 		// What matters most: invalidating one experiment must not evict another
 		// experiment's, or another feature's, keys.
 		{name: "deletes every match and keeps the rest", prefix: "analysis:exp-1:", wantRemain: []string{"analysis:exp-2:lr:h3", "session:abc"}},
 		{name: "no match is not an error and deletes nothing", prefix: "analysis:exp-9:", wantRemain: keys},
-		// The prefix gets "*" appended and goes to SCAN MATCH, so an empty one
-		// matches everything: a whole-cache flush that nothing here rejects.
-		// Pinned rather than endorsed: prefix is concatenated straight into a
-		// glob, so "" becomes MATCH "*". Rejecting it is KAN-68; this case
-		// flips to "returns an error and deletes nothing" then.
-		{name: "an empty prefix deletes the entire database (KAN-68)", prefix: "", wantRemain: nil},
+		// An empty prefix would become MATCH "*" and empty the database. That
+		// is never what a caller means, so it is refused before SCAN runs.
+		{name: "an empty prefix is refused and deletes nothing", prefix: "", wantRemain: keys, wantErr: ErrEmptyPrefix},
+		// The prefix is data, not syntax: each metacharacter names itself, so
+		// only the key spelled that way is evicted.
+		{name: "? is literal, not any-character", prefix: "analysis:?", keys: globKeys, wantRemain: []string{"analysis:*:lr:h9", "analysis:1", "analysis:[1]", `analysis:\x`, "analysis:a", "analysis:b", "analysis:zzz:x"}},
+		{name: "* is literal, not any-sequence", prefix: "analysis:*:", keys: globKeys, wantRemain: []string{"analysis:1", "analysis:[1]", `analysis:\x`, "analysis:a", "analysis:b", "analysis:zzz:x"}},
+		{name: "[...] is literal, not a character class", prefix: "analysis:[1]", keys: globKeys, wantRemain: []string{"analysis:*:lr:h9", "analysis:1", `analysis:\x`, "analysis:a", "analysis:b", "analysis:zzz:x"}},
+		{name: "a backslash is literal, not an escape", prefix: `analysis:\`, keys: globKeys, wantRemain: []string{"analysis:*:lr:h9", "analysis:1", "analysis:[1]", "analysis:a", "analysis:b", "analysis:zzz:x"}},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mr, c := newTestCache(t, keys...)
-			if err := c.DeleteByPrefix(context.Background(), tt.prefix); err != nil {
-				t.Fatalf("DeleteByPrefix(%q): %v", tt.prefix, err)
+			seed := tt.keys
+			if seed == nil {
+				seed = keys
+			}
+			mr, c := newTestCache(t, seed...)
+			err := c.DeleteByPrefix(context.Background(), tt.prefix)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("DeleteByPrefix(%q) = %v, want %v", tt.prefix, err, tt.wantErr)
 			}
 			if got := mr.Keys(); !slices.Equal(got, tt.wantRemain) {
 				t.Errorf("remaining keys = %v, want %v", got, tt.wantRemain)

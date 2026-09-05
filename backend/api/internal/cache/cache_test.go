@@ -88,8 +88,10 @@ func TestAnalysisKeyPrefix(t *testing.T) {
 			t.Errorf("AnalysisKey(%s) = %q, want it to start with the prefix %q", analysisType, key, prefix)
 		}
 	}
-	// DeleteByPrefix hands the prefix to SCAN MATCH unescaped, so a glob
-	// metacharacter in it would match keys it does not name. A UUID has none.
+	// DeleteByPrefix escapes the prefix before matching (KAN-68), so a glob
+	// metacharacter here would be safe but not free: it would widen every
+	// SCAN pattern this package emits. A UUID has none, and should keep
+	// having none.
 	if AnalysisKeyPrefix(other) == prefix || strings.ContainsAny(prefix, `*?[]\`) {
 		t.Errorf("prefix = %q, want it distinct from %s's and free of glob metacharacters", prefix, other)
 	}
