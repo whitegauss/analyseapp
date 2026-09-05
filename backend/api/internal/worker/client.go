@@ -7,6 +7,7 @@ package worker
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -18,11 +19,19 @@ type Client interface {
 	Analyze(ctx context.Context, traceID string, body []byte) (status int, respBody []byte, err error)
 }
 
-// HTTPClient is the real Client implementation, backed by net/http.
+// HTTPClient is the real Client implementation, backed by net/http. HTTP is
+// required: the timeout on it is the only bound on how long an analysis
+// request can occupy a handler, so there is no default to fall back to.
 type HTTPClient struct {
 	BaseURL string
 	HTTP    *http.Client
 }
+
+// ErrNoHTTPClient is returned by Analyze when HTTPClient.HTTP is nil, rather
+// than letting the nil dereference panic. A panic here reaches the caller as
+// middleware.Recoverer's bare 500, which says nothing about the cause;
+// analyze.go maps this error to a 502 that names it.
+var ErrNoHTTPClient = errors.New("worker: HTTP client not configured")
 
 // analyzeURL joins the worker's base URL with the /analyze path. BaseURL comes
 // from WORKER_BASE_URL and may or may not carry a trailing slash, so trailing
@@ -32,6 +41,9 @@ func analyzeURL(baseURL string) string {
 }
 
 func (c *HTTPClient) Analyze(ctx context.Context, traceID string, body []byte) (int, []byte, error) {
+	if c.HTTP == nil {
+		return 0, nil, ErrNoHTTPClient
+	}
 	url := analyzeURL(c.BaseURL)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {

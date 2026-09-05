@@ -205,13 +205,24 @@ func TestHTTPClientAnalyzeFailures(t *testing.T) {
 // Recoverer turns the panic into a 500 rather than killing the process -- so
 // this is a latent contract gap, not a live fault. Giving it a real error is
 // KAN-64.
-func TestAnalyzePanicsWhenHTTPClientIsMissing(t *testing.T) {
+func TestAnalyzeReportsAMissingHTTPClientInsteadOfPanicking(t *testing.T) {
+	// HTTP has no safe default -- http.DefaultClient has no timeout, so
+	// falling back to it would quietly drop the 10s bound main.go sets. The
+	// zero value is a construction mistake, and it is reported as one
+	// (KAN-64) rather than dereferenced.
 	defer func() {
-		if recover() == nil {
-			t.Error("Analyze returned normally; it panics today, so KAN-64 may be fixed")
+		if r := recover(); r != nil {
+			t.Errorf("Analyze panicked: %v, want an error return", r)
 		}
 	}()
 
 	c := &HTTPClient{BaseURL: "http://worker.invalid"}
-	_, _, _ = c.Analyze(context.Background(), "trace-1", []byte(`{}`))
+	status, body, err := c.Analyze(context.Background(), "trace-1", []byte(`{}`))
+
+	if !errors.Is(err, ErrNoHTTPClient) {
+		t.Errorf("Analyze error = %v, want ErrNoHTTPClient", err)
+	}
+	if status != 0 || body != nil {
+		t.Errorf("Analyze = %d, %q, want no status and no body alongside the error", status, body)
+	}
 }
