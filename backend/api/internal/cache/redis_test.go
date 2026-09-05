@@ -69,7 +69,7 @@ func TestRedisCacheDeleteByPrefix(t *testing.T) {
 	keys := []string{"analysis:exp-1:corr:h2", "analysis:exp-1:lr:h1", "analysis:exp-2:lr:h3", "session:abc"}
 	// A key set where the prefixes below are only safe if they are matched
 	// literally: as globs, "?" and "[1]" and "*" each reach the sibling keys.
-	globKeys := []string{"analysis:*:lr:h9", "analysis:a", "analysis:b", `analysis:\x`, "analysis:[1]", "analysis:1", "analysis:zzz:x"}
+	globKeys := []string{"analysis:*:lr:h9", "analysis:?x", "analysis:a", "analysis:b", `analysis:\x`, "analysis:[1]", "analysis:1", "analysis:zzz:x"}
 
 	tests := []struct {
 		name, prefix string
@@ -87,9 +87,9 @@ func TestRedisCacheDeleteByPrefix(t *testing.T) {
 		// The prefix is data, not syntax: each metacharacter names itself, so
 		// only the key spelled that way is evicted.
 		{name: "? is literal, not any-character", prefix: "analysis:?", keys: globKeys, wantRemain: []string{"analysis:*:lr:h9", "analysis:1", "analysis:[1]", `analysis:\x`, "analysis:a", "analysis:b", "analysis:zzz:x"}},
-		{name: "* is literal, not any-sequence", prefix: "analysis:*:", keys: globKeys, wantRemain: []string{"analysis:1", "analysis:[1]", `analysis:\x`, "analysis:a", "analysis:b", "analysis:zzz:x"}},
-		{name: "[...] is literal, not a character class", prefix: "analysis:[1]", keys: globKeys, wantRemain: []string{"analysis:*:lr:h9", "analysis:1", `analysis:\x`, "analysis:a", "analysis:b", "analysis:zzz:x"}},
-		{name: "a backslash is literal, not an escape", prefix: `analysis:\`, keys: globKeys, wantRemain: []string{"analysis:*:lr:h9", "analysis:1", "analysis:[1]", "analysis:a", "analysis:b", "analysis:zzz:x"}},
+		{name: "* is literal, not any-sequence", prefix: "analysis:*:", keys: globKeys, wantRemain: []string{"analysis:1", "analysis:?x", "analysis:[1]", `analysis:\x`, "analysis:a", "analysis:b", "analysis:zzz:x"}},
+		{name: "[...] is literal, not a character class", prefix: "analysis:[1]", keys: globKeys, wantRemain: []string{"analysis:*:lr:h9", "analysis:1", "analysis:?x", `analysis:\x`, "analysis:a", "analysis:b", "analysis:zzz:x"}},
+		{name: "a backslash is literal, not an escape", prefix: `analysis:\`, keys: globKeys, wantRemain: []string{"analysis:*:lr:h9", "analysis:1", "analysis:?x", "analysis:[1]", "analysis:a", "analysis:b", "analysis:zzz:x"}},
 	}
 
 	for _, tt := range tests {
