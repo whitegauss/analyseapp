@@ -232,9 +232,9 @@ def test_degenerate_input_raises_bare_linalg_error(x, y, y_error, expected_messa
 
 @pytest.mark.parametrize("bad_y", [float("nan"), float("inf")], ids=["nan", "inf"])
 def test_non_finite_y_returns_a_nan_result_instead_of_raising(bad_y):
-    # BUG(現状固定): y 側の NaN/inf は例外にならず NaN 入りの結果が返る。JSON に
-    # NaN は書けないので、HTTP 層では応答の直列化で 500 になる
-    # (test_main.py の test_analyze_nan_result_fails_during_serialization 参照)。
+    # y 側の NaN/inf は例外にならず NaN 入りの結果が返る（入力側で弾くのは
+    # KAN-57）。JSON に NaN は書けないので、HTTP 層では応答の直列化で 500 に
+    # なる (test_main.py の test_analyze_nan_result_fails_during_serialization)。
     result = fit([1.0, 2.0, 3.0], [1.0, bad_y, 3.0])
 
     assert math.isnan(result["slope"])
@@ -242,8 +242,20 @@ def test_non_finite_y_returns_a_nan_result_instead_of_raising(bad_y):
     assert math.isnan(result["slope_stderr"])
     assert all(math.isnan(v) for v in result["predicted_y"])
     assert all(math.isnan(v) for v in result["residuals"])
-    # ss_tot も NaN になり `ss_tot > 0` が False -> :80 の else 分岐の 1.0。
-    assert result["r_squared"] == 1.0
+    # ss_tot が NaN になる。かつて `ss_tot > 0` が False になることで
+    # `else 1.0` に落ち、ゴミデータに完璧なフィットを返していた (KAN-58)。
+    # 他の値と同じく NaN であること——1.0 でないことが要点。
+    assert math.isnan(result["r_squared"])
+
+
+def test_overflowing_y_does_not_report_a_perfect_fit():
+    # 入力は全て有限だが、二乗和が inf に振り切れる大きさ。ss_tot は inf
+    # なので `> 0` を満たし NaN 分岐には入らないが、ss_res も inf になるため
+    # inf/inf で NaN になる。直線に乗っているデータではあるものの、この規模
+    # では 1.0 とは言い切れないので NaN が返るのが正しい。
+    result = fit([0.0, 1.0, 2.0], [0.0, 1e300, 2e300])
+
+    assert math.isnan(result["r_squared"])
 
 
 def test_nan_x_with_x_log_is_filtered_out_leaving_too_few_points():
@@ -282,7 +294,8 @@ def test_negative_y_error_is_accepted_and_fits_normally():
 
 
 def test_constant_y_falls_back_to_r_squared_one():
-    # y が全て同値 -> ss_tot == 0 -> :80 の `else 1.0` フォールバック。
+    # y が全て同値 -> ss_tot == 0 -> `else 1.0` フォールバック。ss_tot が
+    # 有限のゼロであるこの枝は KAN-58 の修正後も従来どおり 1.0 を返す。
     result = fit([1.0, 2.0, 3.0], [5.0, 5.0, 5.0])
 
     assert result["slope"] == pytest.approx(0.0, abs=1e-12)
