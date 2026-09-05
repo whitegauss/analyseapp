@@ -33,13 +33,16 @@ func TestStoreErrorResponse(t *testing.T) {
 		// reported as a server fault, not as a 404.
 		{name: "the other resource's sentinel is not recognized", err: projects.ErrNotFound, res: experimentResource,
 			failedTo: "get experiment", wantStatus: 500, wantCode: "internal_error", wantMessage: "failed to get experiment"},
-		// Sentinels are compared with ==, so a wrapped ErrNotFound is a 500
-		// even though errors.Is would match it. No store wraps it today;
-		// pinned so that switching to errors.Is stays a deliberate change.
-		// Pinned rather than endorsed: the comparison is ==, not errors.Is, so
-		// adding context to the error silently turns a 404 into a 500.
-		// Switching to errors.Is is KAN-66; this case flips to 404 then.
-		{name: "a wrapped sentinel is not recognized (KAN-66)", err: fmt.Errorf("query: %w", experiments.ErrNotFound),
+		// Sentinels are matched with errors.Is, so a store may add context
+		// with %w without the 404 turning into a 500 (KAN-66). Both depths
+		// are checked: one %w is what a store would realistically write, and
+		// two proves the match is not a single-unwrap special case.
+		{name: "a wrapped sentinel is still a not-found", err: fmt.Errorf("query: %w", experiments.ErrNotFound),
+			res: experimentResource, failedTo: "get experiment", wantStatus: 404, wantCode: "not_found", wantMessage: "experiment not found"},
+		{name: "a twice-wrapped sentinel is still a not-found", err: fmt.Errorf("get project %s: %w", "id", fmt.Errorf("query: %w", projects.ErrNotFound)),
+			res: projectResource, failedTo: "get project", wantStatus: 404, wantCode: "not_found", wantMessage: "project not found"},
+		// Wrapping does not make the sentinels interchangeable either.
+		{name: "a wrapped sentinel from the other resource is not recognized", err: fmt.Errorf("query: %w", projects.ErrNotFound),
 			res: experimentResource, failedTo: "get experiment", wantStatus: 500, wantCode: "internal_error", wantMessage: "failed to get experiment"},
 		// Callers only reach this function with a non-nil error; falling
 		// through to 500 is the safe direction, so pin it.

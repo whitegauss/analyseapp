@@ -3,6 +3,7 @@ package httpserver
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -238,6 +239,31 @@ func TestHandleGetExperiment(t *testing.T) {
 
 		if rec.Code != http.StatusNotFound {
 			t.Errorf("status = %d, want 404", rec.Code)
+		}
+	})
+
+	// Every other fake here returns the bare sentinel, which the mapping would
+	// recognize even compared with ==. This one adds context the way a real
+	// store reasonably might, so a regression from errors.Is back to == shows
+	// up as a 500 here instead of hiding until production (KAN-66).
+	t.Run("not found, wrapped by the store", func(t *testing.T) {
+		id := uuid.New()
+		store := &fakeStore{
+			t: t,
+			getByIDFn: func(ctx context.Context, gotID, userID uuid.UUID) (experiments.Experiment, error) {
+				return experiments.Experiment{}, fmt.Errorf("get experiment %s: %w", gotID, experiments.ErrNotFound)
+			},
+		}
+		req := newTestRequest("GET", id.String(), "", true)
+		rec := httptest.NewRecorder()
+
+		handleGetExperiment(store)(rec, req)
+
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("status = %d, want 404", rec.Code)
+		}
+		if body := decodeEnvelope(t, rec); body.Error == nil || body.Error.Code != "not_found" {
+			t.Errorf("error = %+v, want not_found", body.Error)
 		}
 	})
 

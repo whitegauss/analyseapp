@@ -1,6 +1,7 @@
 package httpserver
 
 import (
+	"errors"
 	"net/http"
 
 	"analyseapp/api/internal/experiments"
@@ -26,11 +27,14 @@ var (
 // http.ResponseWriter: 404 for the resource's ErrNotFound (which never
 // distinguishes "doesn't exist" from "not yours", so ownership isn't
 // leaked), 500 for anything else. failedTo completes the message "failed to
-// <failedTo>" (e.g. "get experiment"). The sentinel is compared with ==, not
-// errors.Is, so a wrapped ErrNotFound maps to 500; no store wraps it today
-// and errors_test.go pins that, so changing it stays deliberate.
+// <failedTo>" (e.g. "get experiment").
+//
+// The sentinel is matched with errors.Is, so a store is free to add context
+// with %w. Compared with == instead, wrapping the sentinel -- the idiomatic
+// thing to do -- would silently turn a 404 into a 500, and no handler test
+// would catch it: the fakes return bare sentinels (KAN-66).
 func storeErrorResponse(err error, res storeResource, failedTo string) (status int, code, message string) {
-	if err == res.notFound {
+	if errors.Is(err, res.notFound) {
 		return http.StatusNotFound, "not_found", res.name + " not found"
 	}
 	return http.StatusInternalServerError, "internal_error", "failed to " + failedTo
