@@ -122,7 +122,7 @@ curl -X POST "$SUPABASE_URL/auth/v1/signup" \
 
 - `/api/v1`配下は接続元IP単位で100リクエスト/分にレート制限しています。超過すると`429`（`rate_limited`）が返ります（接続元IPはTCP接続自体から解決しており、リクエストヘッダーは信用していません。将来リバースプロキシを前段に置く場合は解決方法の見直しが必要です）
 - 全レスポンスに`X-Content-Type-Options`・`X-Frame-Options`・`Referrer-Policy`・`Strict-Transport-Security`のセキュリティヘッダーを付与しています（JSON APIのみのため`Content-Security-Policy`は設定していません）
-- `GET /metrics`でPrometheus形式のメトリクス（`http_requests_total`・`http_request_duration_seconds`をメソッド・ルートパターン・ステータスコード別に、`analysis_cache_results_total`を`/analyze`のキャッシュhit/miss別に）を公開しています。`/healthz`/`/readyz`と同様に認証なし・スクレイピングするPrometheusサーバー自体は未構築（本番運用時は外部公開しないようネットワーク側で制限してください）
+- `GET /metrics`でPrometheus形式のメトリクス（`http_requests_total`・`http_request_duration_seconds`をメソッド・ルートパターン・ステータスコード別に、`http_panics_total`をメソッド・ルートパターン別に、`analysis_cache_results_total`を`/analyze`のキャッシュhit/miss別に）を公開しています。panicしたリクエストは`http_requests_total`にステータス500として記録されるため`status=~"5.."`のアラートで拾えます。`http_panics_total`はそれをコードが意図して返した500と区別するためのものです。`/healthz`/`/readyz`と同様に認証なし・スクレイピングするPrometheusサーバー自体は未構築（本番運用時は外部公開しないようネットワーク側で制限してください）
 
 ## ヘッダー・フッター（フロントエンド）
 

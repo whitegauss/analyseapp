@@ -35,6 +35,18 @@ var (
 		[]string{"method", "route"},
 	)
 
+	// PanicsTotal counts requests whose handler panicked. Those are also
+	// counted in http_requests_total as status 500 -- that is what an alert
+	// on status=~"5.." needs -- so this exists to tell them apart from a 500
+	// the code chose to return.
+	PanicsTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "http_panics_total",
+			Help: "Total HTTP requests whose handler panicked, labeled by method and route pattern.",
+		},
+		[]string{"method", "route"},
+	)
+
 	// AnalysisCacheResultsTotal counts /analyze requests by cache outcome
 	// (hit or miss) -- the same signal already reported per-request via the
 	// X-Cache response header, aggregated here so cache effectiveness is
@@ -57,31 +69,68 @@ func Handler() http.Handler {
 // passes through it. Route labels use chi's matched route *pattern* (e.g.
 // "/api/v1/experiments/{id}"), not the raw request path, so that path
 // parameters like UUIDs don't cause unbounded label cardinality.
+//
+// Recording happens in a defer, so a panicking handler is counted rather
+// than skipped. Written after next.ServeHTTP instead, the panic unwinds
+// straight past it: middleware.Recoverer sits outside this one and turns
+// the panic into a 500 the client sees, while the metrics show nothing at
+// all -- exactly the requests an alert on status=~"5.." is meant to catch
+// (KAN-67). The panic is re-raised afterwards so Recoverer still handles
+// it; this middleware only observes.
 func Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		sw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
-		next.ServeHTTP(sw, r)
-		duration := time.Since(start).Seconds()
 
-		route := "unmatched"
-		if rctx := chi.RouteContext(r.Context()); rctx != nil {
-			if pattern := rctx.RoutePattern(); pattern != "" {
-				route = pattern
+		defer func() {
+			rec := recover()
+			route := "unmatched"
+			if rctx := chi.RouteContext(r.Context()); rctx != nil {
+				if pattern := rctx.RoutePattern(); pattern != "" {
+					route = pattern
+				}
 			}
-		}
+			if rec != nil {
+				PanicsTotal.WithLabelValues(r.Method, route).Inc()
+				// Recoverer will send the 500 -- unless the handler had
+				// already written a header, in which case the status the
+				// client saw is the one already recorded.
+				if !sw.wroteHeader {
+					sw.status = http.StatusInternalServerError
+				}
+			}
 
-		requestsTotal.WithLabelValues(r.Method, route, strconv.Itoa(sw.status)).Inc()
-		requestDuration.WithLabelValues(r.Method, route).Observe(duration)
+			requestsTotal.WithLabelValues(r.Method, route, strconv.Itoa(sw.status)).Inc()
+			requestDuration.WithLabelValues(r.Method, route).Observe(time.Since(start).Seconds())
+
+			if rec != nil {
+				panic(rec)
+			}
+		}()
+
+		next.ServeHTTP(sw, r)
 	})
 }
 
+// statusWriter remembers the status the client was actually sent. status
+// starts at 200 because a handler that only calls Write sends one
+// implicitly; wroteHeader separates that from a handler that panicked
+// before sending anything, whose 200 would be a fiction.
 type statusWriter struct {
 	http.ResponseWriter
-	status int
+	status      int
+	wroteHeader bool
 }
 
 func (sw *statusWriter) WriteHeader(status int) {
-	sw.status = status
+	if !sw.wroteHeader {
+		sw.status = status
+		sw.wroteHeader = true
+	}
 	sw.ResponseWriter.WriteHeader(status)
+}
+
+func (sw *statusWriter) Write(b []byte) (int, error) {
+	sw.wroteHeader = true
+	return sw.ResponseWriter.Write(b)
 }
