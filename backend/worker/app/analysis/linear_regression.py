@@ -85,7 +85,25 @@ def linear_regression(data: DataSeries, params: dict[str, Any]) -> dict[str, Any
     residuals = y_fit - predicted
     ss_res = float(np.sum(residuals**2))
     ss_tot = float(np.sum((y_fit - np.mean(y_fit)) ** 2))
-    r_squared = 1.0 - ss_res / ss_tot if ss_tot > 0 else 1.0
+    # Three cases, spelled out rather than written as a single
+    # `if ss_tot > 0 else 1.0`. That form tests a negation: a NaN ss_tot
+    # (a NaN or inf reached y, and numpy propagates it here rather than
+    # raising) fails `> 0` just like a zero one does, so it took the
+    # else branch and reported a perfect fit for garbage (KAN-58).
+    if np.isnan(ss_tot):
+        # The fit itself is non-finite; slope and the residuals are already
+        # NaN, and R-squared is no more knowable than they are.
+        r_squared = float("nan")
+    elif ss_tot > 0:
+        # An ss_tot of inf lands here: the y values are so spread out that
+        # their squares overflow. Then ss_res is either inf too (giving NaN,
+        # which is honest) or small enough to be finite, which for a spread
+        # that large means the points really are on the line -- 1.0.
+        r_squared = 1.0 - ss_res / ss_tot
+    else:
+        # ss_tot == 0: every y is the same value, so the fit is the
+        # horizontal line through all of them and the residuals are zero.
+        r_squared = 1.0
 
     return {
         "slope": float(slope),
