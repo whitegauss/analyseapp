@@ -10,6 +10,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -21,13 +22,21 @@ import (
 type Cache interface {
 	Get(ctx context.Context, key string) (value []byte, ok bool, err error)
 	Set(ctx context.Context, key string, value []byte, ttl time.Duration) error
-	// DeleteByPrefix removes every key starting with prefix. Used to
+	// DeleteByPrefix removes every key starting with prefix, and only
+	// those: prefix is a literal string, not a pattern. Used to
 	// invalidate all cached analysis results for an experiment when its
 	// raw_data changes (the cache key includes a params hash but not a
 	// raw_data hash, so a stale cached result would otherwise outlive an
-	// edit for up to AnalysisTTL).
+	// edit for up to AnalysisTTL). An empty prefix names every key, so it
+	// is rejected with ErrEmptyPrefix rather than treated as "delete
+	// everything".
 	DeleteByPrefix(ctx context.Context, prefix string) error
 }
+
+// ErrEmptyPrefix is returned by DeleteByPrefix when given an empty prefix.
+// Deleting by "" would mean flushing the whole database, which no caller
+// wants and which an uninitialised variable would otherwise trigger silently.
+var ErrEmptyPrefix = errors.New("cache: DeleteByPrefix requires a non-empty prefix")
 
 // AnalysisTTL is how long a cached analysis result is kept (PDR.md section
 // 7: "実験データが不変なら長め（24h目安）").
