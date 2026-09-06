@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -17,7 +18,10 @@ import (
 	"github.com/MicahParks/keyfunc/v3"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 
+	"analyseapp/api/internal/logging"
 	"analyseapp/api/internal/response"
 )
 
@@ -202,23 +206,127 @@ func TestMiddlewareRejects(t *testing.T) {
 	}
 }
 
-// The middleware forwards the jwt library's parse error verbatim to the client.
-// That is more than a caller needs to know; this test pins today's behaviour so
-// that tightening it later is a deliberate, visible change rather than a
-// silent one. Tightening it is KAN-54.
-func TestMiddlewareLeaksParseErrorDetail(t *testing.T) {
+// The 401 body used to carry golang-jwt's own wording. Every rejection now
+// answers with the same fixed phrase, so the response cannot drift with a
+// dependency bump and cannot separate "expired" from "bad signature"
+// (KAN-54).
+func TestMiddlewareDoesNotLeakParseErrorDetail(t *testing.T) {
+	key, srv := newSigningKey(t)
+	jwks := newJWKS(t, srv)
+	otherKey, _ := newSigningKey(t)
+
+	expired := validClaims()
+	expired["exp"] = time.Now().Add(-time.Minute).Unix()
+
+	// One case per shape of parse failure the library words differently.
+	tests := []struct {
+		name, authHeader string
+	}{
+		{name: "not a JWT at all", authHeader: "Bearer garbage"},
+		{name: "expired", authHeader: "Bearer " + sign(t, key, expired)},
+		{name: "signed by an unknown key", authHeader: "Bearer " + sign(t, otherKey, validClaims())},
+	}
+
+	// Fragments of the library's phrasing for exactly those three.
+	leaks := []string{
+		"invalid number of segments",
+		"token is expired",
+		"signature is invalid",
+		"crypto/",
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec, reached, _ := serve(t, jwks, tt.authHeader)
+
+			if reached {
+				t.Error("next handler ran for a rejected request")
+			}
+			if rec.Code != http.StatusUnauthorized {
+				t.Errorf("status = %d, want 401", rec.Code)
+			}
+
+			var body response.Envelope
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatalf("decode body: %v", err)
+			}
+			if body.Error.Message != "invalid token" {
+				t.Errorf("message = %q, want exactly %q", body.Error.Message, "invalid token")
+			}
+			for _, leak := range leaks {
+				if strings.Contains(body.Error.Message, leak) {
+					t.Errorf("message = %q, want it free of the library's wording %q", body.Error.Message, leak)
+				}
+			}
+		})
+	}
+}
+
+// The detail is not discarded, only moved: without it in the log there is no
+// way to tell an expired token from a forged one when a user reports a 401.
+// The line is only useful if it carries the same trace id as the request it
+// rejected, so this runs through logging.Middleware -- the real chain -- and
+// checks the id that comes out, not merely that the field exists.
+func TestMiddlewareLogsWhyTheTokenWasRejected(t *testing.T) {
 	_, srv := newSigningKey(t)
 	jwks := newJWKS(t, srv)
 
-	rec, _, _ := serve(t, jwks, "Bearer garbage")
+	var buf bytes.Buffer
+	saved, savedLevel := log.Logger, zerolog.GlobalLevel()
+	log.Logger = zerolog.New(&buf)
+	zerolog.SetGlobalLevel(zerolog.DebugLevel)
+	t.Cleanup(func() {
+		log.Logger = saved
+		zerolog.SetGlobalLevel(savedLevel)
+	})
 
-	var body response.Envelope
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode body: %v", err)
+	const traceID = "0b6c1f9e-3c5a-4f21-9d7e-8a2b4c6d0e13"
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/experiments", nil)
+	req.Header.Set("Authorization", "Bearer garbage")
+	// logging.Middleware reuses an inbound X-Trace-Id, which is what lets the
+	// assertion below name the expected value instead of guessing a uuid.
+	req.Header.Set("X-Trace-Id", traceID)
+
+	next := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Error("next handler ran for a rejected request")
+	})
+	logging.Middleware(Middleware(jwks)(next)).ServeHTTP(httptest.NewRecorder(), req)
+
+	rejection, ok := findLogLine(t, buf.Bytes(), "rejected a bearer token")
+	if !ok {
+		t.Fatalf("log = %q, want a line for the rejected token", buf.String())
 	}
-	if !strings.Contains(body.Error.Message, "token contains an invalid number of segments") {
-		t.Errorf("message = %q, want the underlying parse error to be echoed", body.Error.Message)
+	if !strings.Contains(rejection.Error, "invalid number of segments") {
+		t.Errorf("error = %q, want the parse error the body no longer carries", rejection.Error)
 	}
+	if rejection.TraceID != traceID {
+		t.Errorf("trace_id = %q, want %q", rejection.TraceID, traceID)
+	}
+}
+
+// authLogLine is the subset of the JSON log record these tests assert on.
+type authLogLine struct {
+	TraceID string `json:"trace_id"`
+	Error   string `json:"error"`
+	Message string `json:"message"`
+}
+
+// findLogLine returns the logged record whose message is msg. The buffer holds
+// one JSON object per line and more than one line here, since
+// logging.Middleware records the request itself alongside the rejection.
+func findLogLine(t *testing.T, logged []byte, msg string) (authLogLine, bool) {
+	t.Helper()
+
+	for _, raw := range bytes.Split(bytes.TrimSpace(logged), []byte("\n")) {
+		var line authLogLine
+		if err := json.Unmarshal(raw, &line); err != nil {
+			t.Fatalf("decode log line %q: %v", raw, err)
+		}
+		if line.Message == msg {
+			return line, true
+		}
+	}
+	return authLogLine{}, false
 }
 
 func TestNewJWKSTrailingSlash(t *testing.T) {
