@@ -25,21 +25,27 @@ export function formatSigned(value: number, decimals: number): string {
   return `${sign} ${Math.abs(value).toFixed(decimals)}`;
 }
 
+/** Shown in place of a "±" term when the fit reports no uncertainty at all.
+ * Writing "± 0.0" there would claim a perfect measurement rather than an
+ * unknown one. */
+export const UNKNOWN_UNCERTAINTY_TEXT = "算出不可";
+
 /**
- * A non-positive or non-finite stderr is treated as exactly zero uncertainty
- * rather than as a reason to skip the band. The fit still has a best estimate
- * worth drawing; what is missing is only the spread around it.
+ * A null, non-positive or non-finite stderr is treated as exactly zero
+ * uncertainty rather than as a reason to skip the band. The fit still has a
+ * best estimate worth drawing; what is missing is only the spread around it.
  */
-export function safeStderr(stderr: number): number {
-  return Number.isFinite(stderr) && stderr > 0 ? stderr : 0;
+export function safeStderr(stderr: number | null): number {
+  return stderr !== null && Number.isFinite(stderr) && stderr > 0 ? stderr : 0;
 }
 
 /** `+ (1.23 ± 0.05)` — the parenthesised form used for the intercept term. */
 export function formatSignedWithUncertainty(
   value: number,
   decimals: number,
-  uncertainty: number,
+  uncertainty: number | null,
 ): string {
+  if (uncertainty === null) return formatSigned(value, decimals);
   const sign = value < 0 ? "-" : "+";
   return `${sign} (${Math.abs(value).toFixed(decimals)} ± ${formatUncertainty(uncertainty)})`;
 }
@@ -117,7 +123,12 @@ export function formatModelEquation(
     regression.intercept,
     regression.intercept_stderr,
   );
-  const slopeTerm = `(${slope.rounded.toFixed(slope.decimals)} ± ${formatUncertainty(regression.slope_stderr)})`;
+  // With no uncertainty to report, the parenthesised "(a ± b)" form has
+  // nothing to hold: the bare coefficient is the honest rendering.
+  const slopeTerm =
+    regression.slope_stderr === null
+      ? slope.rounded.toFixed(slope.decimals)
+      : `(${slope.rounded.toFixed(slope.decimals)} ± ${formatUncertainty(regression.slope_stderr)})`;
   const interceptTerm = formatSignedWithUncertainty(
     intercept.rounded,
     intercept.decimals,

@@ -120,6 +120,15 @@ describe("uncertaintyBoundsAt", () => {
     expect(upper).toBeCloseTo(11, 10);
   });
 
+  it("collapses onto the line when the fit reports no stderrs", () => {
+    // A two-point fit: the worker sends null rather than a number, because
+    // the line is exact and the spread is unknown (KAN-57).
+    const r = fit({ slope_stderr: null, intercept_stderr: null });
+    const { lower, upper } = uncertaintyBoundsAt(r, 5, false, false);
+    expect(lower).toBeCloseTo(11, 10);
+    expect(upper).toBeCloseTo(11, 10);
+  });
+
   it("widens as x moves away from the intercept", () => {
     const near = uncertaintyBoundsAt(fit(), 1, false, false);
     const far = uncertaintyBoundsAt(fit(), 100, false, false);
@@ -181,6 +190,18 @@ describe("formatModelEquation", () => {
 
   it("carries the uncertainty on both terms", () => {
     expect(formatModelEquation(fit())).toContain("±");
+  });
+
+  it("drops the ± terms when the fit reports no uncertainty", () => {
+    // "± 0.0" would claim a perfect measurement; a two-point fit has an
+    // exact line and an unknown spread, so the bare coefficients are what is
+    // actually true (KAN-57).
+    const html = formatModelEquation(
+      fit({ slope_stderr: null, intercept_stderr: null }),
+    );
+    expect(html).not.toContain("±");
+    expect(html).toContain("<i>y</i>");
+    expect(html).toContain("<i>x</i>");
   });
 });
 

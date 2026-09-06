@@ -52,6 +52,16 @@ class InsufficientDataError(AnalysisError):
     code = "insufficient_data"
 
 
+class DegenerateInputError(AnalysisError):
+    """The data is well-formed but cannot be fitted: a non-finite value, a
+    non-positive uncertainty, or an x column with no spread. These come from
+    what the client sent, so they are a 400 -- reaching numpy instead produced
+    a bare LinAlgError/ValueError, which is not an AnalysisError and so left
+    the envelope entirely and surfaced as a 500 (KAN-57)."""
+
+    code = "degenerate_input"
+
+
 def run(type_: str, data: DataSeries, params: dict[str, Any]) -> dict[str, Any]:
     """Look up and execute the analysis function for the given type.
 

@@ -68,40 +68,87 @@ server_error_client = TestClient(app, raise_server_exceptions=False)
 
 
 @pytest.mark.parametrize(
-    "columns",
+    "columns, expected_code",
     [
-        {"x": [1.0, 1.0, 1.0], "y": [1.0, 2.0, 3.0]},
-        {"x": [1.0, 2.0], "y": [1.0, 2.0]},
-        {"x": [0.0, 1.0, 2.0], "y": [1.0, 3.0, 5.0], "y_error": [0.1, 0.0, 0.1]},
+        ({"x": [1.0, 1.0, 1.0], "y": [1.0, 2.0, 3.0]}, "degenerate_input"),
+        (
+            {"x": [0.0, 1.0, 2.0], "y": [1.0, 3.0, 5.0], "y_error": [0.1, 0.0, 0.1]},
+            "degenerate_input",
+        ),
+        (
+            {"x": [0.0, 1.0, 2.0], "y": [1.0, 3.0, 5.0], "y_error": [0.1, -0.1, 0.1]},
+            "degenerate_input",
+        ),
+        ({"x": [1.0, 2.0, 3.0], "y": [1.0, 2.0, 3.0], "y_error": [0.1, 0.1, 0.1]}, None),
     ],
-    ids=["x-zero-variance", "exactly-two-points", "y-error-contains-zero"],
+    ids=[
+        "x-zero-variance",
+        "y-error-contains-zero",
+        "y-error-contains-negative",
+        "control-well-formed",
+    ],
 )
-def test_analyze_degenerate_input_returns_bare_500_not_envelope(columns):
+def test_analyze_degenerate_input_returns_400_in_the_envelope(columns, expected_code):
+    # These are all failures of what the client sent, so they belong in the
+    # envelope as a 400. Reaching numpy instead produced a bare LinAlgError,
+    # which is not an AnalysisError: it escaped the handler and came back as
+    # a body that was not even {data, error, meta} (KAN-57 / KAN-60).
     res = server_error_client.post(
         "/analyze",
         json={"type": "linear_regression", "data": {"columns": columns}},
     )
 
-    # BUG(現状固定): numpy の例外が AnalysisError ではないため envelope の
-    # ハンドラに捕まらず、{data, error, meta} ですらない素の 500 が返る。
-    assert res.status_code == 500
-    assert res.text == "Internal Server Error"
+    body = res.json()
+    if expected_code is None:
+        assert res.status_code == 200, body
+        assert body["error"] is None
+        return
+
+    assert res.status_code == 400, body
+    assert body["error"]["code"] == expected_code
+    assert body["data"] is None
+    # The message has to say which column and which constraint, or the user
+    # cannot tell which of their columns to go and fix.
+    assert "y_error" in body["error"]["message"] or "'x'" in body["error"]["message"]
 
 
-def test_analyze_nan_result_fails_during_serialization():
-    # NaN は JSON リテラルとしては送れてしまうため pydantic を通過し、解析も
-    # 成功する。落ちるのは NaN 入りの結果を json.dumps する応答生成の段階。
+def test_analyze_exactly_two_points_returns_the_fit_without_standard_errors():
+    # Two points define a line exactly; what they cannot give is a spread
+    # around it. Refusing the whole fit would be less useful than reporting
+    # the line and saying the uncertainty is unknown (KAN-57).
+    res = client.post(
+        "/analyze",
+        json={
+            "type": "linear_regression",
+            "data": {"columns": {"x": [1.0, 2.0], "y": [1.0, 3.0]}},
+        },
+    )
+
+    assert res.status_code == 200, res.text
+    data = res.json()["data"]["result"]
+    assert data["slope"] == pytest.approx(2.0)
+    assert data["intercept"] == pytest.approx(-1.0)
+    assert data["slope_stderr"] is None
+    assert data["intercept_stderr"] is None
+
+
+def test_analyze_non_finite_input_is_rejected_before_serialization():
+    # NaN is not valid JSON but is accepted by the parser, so it used to
+    # reach the analysis, produce a NaN-filled result, and only fail when the
+    # response could not be serialised -- as a bare 500 (KAN-57).
     res = server_error_client.post(
         "/analyze",
         content=b'{"type":"linear_regression","data":{"columns":{"x":[1,2,3],"y":[1,NaN,3]}}}',
         headers={"content-type": "application/json"},
     )
 
-    assert res.status_code == 500
-    assert res.text == "Internal Server Error"
+    assert res.status_code == 400, res.text
+    body = res.json()
+    assert body["error"]["code"] == "degenerate_input"
+    assert "'y'" in body["error"]["message"]
 
 
-def test_analyze_single_point_returns_400_with_log_scale_wording():
+def test_analyze_single_point_does_not_mention_log_scale():
     res = client.post(
         "/analyze",
         json={"type": "linear_regression", "data": {"columns": {"x": [1.0], "y": [1.0]}}},
@@ -110,5 +157,25 @@ def test_analyze_single_point_returns_400_with_log_scale_wording():
     assert res.status_code == 400
     body = res.json()
     assert body["error"]["code"] == "insufficient_data"
-    # BUG(現状固定): log スケールを要求していないのに log 前提の文言が返る。
+    # No log scale was asked for, so naming one sends the user looking for a
+    # setting they never touched (KAN-59).
+    assert "log" not in body["error"]["message"]
+    assert "at least 2 data points" in body["error"]["message"]
+
+
+def test_analyze_single_point_with_log_still_explains_the_filter():
+    res = client.post(
+        "/analyze",
+        json={
+            "type": "linear_regression",
+            "data": {"columns": {"x": [1.0, -1.0], "y": [1.0, 2.0]}},
+            "params": {"x_log": True},
+        },
+    )
+
+    assert res.status_code == 400
+    body = res.json()
+    assert body["error"]["code"] == "insufficient_data"
+    # Here the log filter really is why a point went missing, and saying so
+    # is the useful part of the old wording.
     assert "log-scale fit" in body["error"]["message"]

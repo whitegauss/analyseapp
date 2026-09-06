@@ -70,6 +70,21 @@ describe("buildCsv", () => {
     );
   });
 
+  it("omits the ± term when the fit reports no uncertainty", () => {
+    // A two-point fit. "± null" would be noise and "± 0" would claim a
+    // perfect measurement (KAN-57).
+    const csv = buildCsv(makeExperiment(), {
+      ...regression,
+      slope_stderr: null,
+      intercept_stderr: null,
+    });
+    expect(csv).toContain(
+      "# regression: slope=2, intercept=1, " +
+        "r_squared=0.99, x_log=false, y_log=false",
+    );
+    expect(csv).not.toContain("±");
+  });
+
   it("uses the raw column keys as headers by default", () => {
     expect(lines(buildCsv(makeExperiment(), null))[2]).toBe("x,y");
   });
