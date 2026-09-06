@@ -11,7 +11,9 @@ import (
 	"github.com/MicahParks/keyfunc/v3"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"github.com/rs/zerolog/log"
 
+	"analyseapp/api/internal/logging"
 	"analyseapp/api/internal/response"
 )
 
@@ -88,7 +90,21 @@ func Middleware(jwks keyfunc.Keyfunc) func(http.Handler) http.Handler {
 
 			claims := jwt.MapClaims{}
 			if _, err := jwt.ParseWithClaims(tokenString, claims, jwks.Keyfunc); err != nil {
-				response.WriteError(w, http.StatusUnauthorized, "unauthorized", "invalid token: "+err.Error())
+				// The library's own wording ("token is expired by 1m0s",
+				// "token contains an invalid number of segments") used to go
+				// straight into the body. None of it is secret -- the caller
+				// sent the token -- but it is golang-jwt's phrasing rather
+				// than this API's: it changes under a dependency bump, and
+				// separating "expired" from "bad signature" is a hint this
+				// endpoint has no reason to give. Every other rejection here
+				// answers with a fixed phrase; this one now does too, and the
+				// detail goes to the log, where the trace id ties it back to
+				// the request (KAN-54).
+				log.Debug().
+					Err(err).
+					Str("trace_id", logging.TraceID(r.Context())).
+					Msg("rejected a bearer token")
+				response.WriteError(w, http.StatusUnauthorized, "unauthorized", "invalid token")
 				return
 			}
 

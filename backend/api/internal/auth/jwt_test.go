@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -17,6 +18,8 @@ import (
 	"github.com/MicahParks/keyfunc/v3"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 
 	"analyseapp/api/internal/response"
 )
@@ -202,22 +205,88 @@ func TestMiddlewareRejects(t *testing.T) {
 	}
 }
 
-// The middleware forwards the jwt library's parse error verbatim to the client.
-// That is more than a caller needs to know; this test pins today's behaviour so
-// that tightening it later is a deliberate, visible change rather than a
-// silent one. Tightening it is KAN-54.
-func TestMiddlewareLeaksParseErrorDetail(t *testing.T) {
+// The 401 body used to carry golang-jwt's own wording. Every rejection now
+// answers with the same fixed phrase, so the response cannot drift with a
+// dependency bump and cannot separate "expired" from "bad signature"
+// (KAN-54).
+func TestMiddlewareDoesNotLeakParseErrorDetail(t *testing.T) {
+	key, srv := newSigningKey(t)
+	jwks := newJWKS(t, srv)
+	otherKey, _ := newSigningKey(t)
+
+	expired := validClaims()
+	expired["exp"] = time.Now().Add(-time.Minute).Unix()
+
+	// One case per shape of parse failure the library words differently.
+	tests := []struct {
+		name, authHeader string
+	}{
+		{name: "not a JWT at all", authHeader: "Bearer garbage"},
+		{name: "expired", authHeader: "Bearer " + sign(t, key, expired)},
+		{name: "signed by an unknown key", authHeader: "Bearer " + sign(t, otherKey, validClaims())},
+	}
+
+	// Fragments of the library's phrasing for exactly those three.
+	leaks := []string{
+		"invalid number of segments",
+		"token is expired",
+		"signature is invalid",
+		"crypto/",
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec, reached, _ := serve(t, jwks, tt.authHeader)
+
+			if reached {
+				t.Error("next handler ran for a rejected request")
+			}
+			if rec.Code != http.StatusUnauthorized {
+				t.Errorf("status = %d, want 401", rec.Code)
+			}
+
+			var body response.Envelope
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatalf("decode body: %v", err)
+			}
+			if body.Error.Message != "invalid token" {
+				t.Errorf("message = %q, want exactly %q", body.Error.Message, "invalid token")
+			}
+			for _, leak := range leaks {
+				if strings.Contains(body.Error.Message, leak) {
+					t.Errorf("message = %q, want it free of the library's wording %q", body.Error.Message, leak)
+				}
+			}
+		})
+	}
+}
+
+// The detail is not discarded, only moved: without it in the log there is no
+// way to tell an expired token from a forged one when a user reports a 401.
+func TestMiddlewareLogsWhyTheTokenWasRejected(t *testing.T) {
 	_, srv := newSigningKey(t)
 	jwks := newJWKS(t, srv)
 
-	rec, _, _ := serve(t, jwks, "Bearer garbage")
+	var buf bytes.Buffer
+	saved, savedLevel := log.Logger, zerolog.GlobalLevel()
+	log.Logger = zerolog.New(&buf)
+	zerolog.SetGlobalLevel(zerolog.DebugLevel)
+	t.Cleanup(func() {
+		log.Logger = saved
+		zerolog.SetGlobalLevel(savedLevel)
+	})
 
-	var body response.Envelope
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode body: %v", err)
+	serve(t, jwks, "Bearer garbage")
+
+	logged := buf.String()
+	if !strings.Contains(logged, "invalid number of segments") {
+		t.Errorf("log = %q, want it to carry the parse error the body no longer does", logged)
 	}
-	if !strings.Contains(body.Error.Message, "token contains an invalid number of segments") {
-		t.Errorf("message = %q, want the underlying parse error to be echoed", body.Error.Message)
+	// Empty here because no logging.Middleware ran in front of this test;
+	// what matters is that the field is emitted, so the real chain has
+	// somewhere to put the id that ties this line to the request.
+	if !strings.Contains(logged, `"trace_id"`) {
+		t.Errorf("log = %q, want a trace_id field to tie it back to the request", logged)
 	}
 }
 
