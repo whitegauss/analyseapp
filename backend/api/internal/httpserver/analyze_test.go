@@ -1,8 +1,10 @@
 package httpserver
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,9 +12,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 
 	"analyseapp/api/internal/cache"
 	"analyseapp/api/internal/experiments"
+	"analyseapp/api/internal/worker"
 )
 
 // fakeWorkerClient is a minimal worker.Client implementation for handler
@@ -160,6 +165,50 @@ func TestHandleAnalyzeExperiment(t *testing.T) {
 		}
 		if body := decodeEnvelope(t, rec); body.Error == nil || body.Error.Code != "worker_unreachable" {
 			t.Errorf("error code = %+v, want worker_unreachable", body.Error)
+		}
+	})
+
+	// Every worker failure answers with the same 502, so the log is the only
+	// place the reason survives -- and it used to be dropped here entirely,
+	// leaving that 502 to read as "the worker is down" even when the worker
+	// had answered and only the response was cut short (KAN-63).
+	t.Run("the reason the worker call failed reaches the log", func(t *testing.T) {
+		store := &fakeStore{
+			t: t,
+			getByIDFn: func(ctx context.Context, id, userID uuid.UUID) (experiments.Experiment, error) {
+				return experiments.Experiment{ID: id, UserID: userID, RawData: map[string]any{"columns": map[string]any{}}}, nil
+			},
+		}
+		wc := &fakeWorkerClient{
+			t: t,
+			analyzeFn: func(ctx context.Context, traceID string, body []byte) (int, []byte, error) {
+				return 0, nil, fmt.Errorf("%w (the worker had answered 200): unexpected EOF", worker.ErrReadResponse)
+			},
+		}
+
+		var buf bytes.Buffer
+		saved := log.Logger
+		log.Logger = zerolog.New(&buf)
+		t.Cleanup(func() { log.Logger = saved })
+
+		req := newTestRequest("POST", uuid.New().String(), `{"type":"linear_regression"}`, true)
+		rec := httptest.NewRecorder()
+
+		handleAnalyzeExperiment(store, wc, newFakeCache())(rec, req)
+
+		// The response to the client is deliberately unchanged.
+		if rec.Code != http.StatusBadGateway {
+			t.Errorf("status = %d, want 502", rec.Code)
+		}
+		logged := buf.String()
+		if !strings.Contains(logged, "reading the response failed") {
+			t.Errorf("log = %q, want it to say the response could not be read", logged)
+		}
+		if !strings.Contains(logged, "200") {
+			t.Errorf("log = %q, want the status the worker answered", logged)
+		}
+		if !strings.Contains(logged, `"trace_id"`) {
+			t.Errorf("log = %q, want a trace_id to tie it to the request", logged)
 		}
 	})
 

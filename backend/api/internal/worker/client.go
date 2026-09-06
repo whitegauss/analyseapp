@@ -120,7 +120,22 @@ func (c *HTTPClient) Analyze(ctx context.Context, traceID string, body []byte) (
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return 0, nil, err
+		// The worker did answer -- it is the body that ran out. analyze.go
+		// turns every error here into the same 502 "worker_unreachable", so
+		// without saying which failure this was, a truncated response reads
+		// in the logs and metrics as a worker that is down. It is not: the
+		// worker logged the status below, and the two sides' logs then
+		// disagree about the same request (KAN-63).
+		//
+		// The status goes in the message rather than the return value:
+		// callers treat any error as a failure and would misread a non-zero
+		// status returned beside one.
+		return 0, nil, fmt.Errorf("%w (the worker had answered %d): %w", ErrReadResponse, resp.StatusCode, err)
 	}
 	return resp.StatusCode, respBody, nil
 }
+
+// ErrReadResponse is returned by Analyze when the worker answered but its
+// response body could not be read to the end -- a connection dropped
+// mid-response, not a worker that could not be reached.
+var ErrReadResponse = errors.New("worker: reading the response failed")
