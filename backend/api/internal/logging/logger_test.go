@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/rs/zerolog"
@@ -19,6 +20,7 @@ type logLine struct {
 	Path    string `json:"path"`
 	Status  int    `json:"status"`
 	Panic   string `json:"panic"`
+	Stack   string `json:"stack"`
 	Message string `json:"message"`
 }
 
@@ -112,11 +114,42 @@ func TestMiddlewareLogsAPanickingHandler(t *testing.T) {
 	if !panicked {
 		t.Error("the panic did not reach the caller; Recoverer would never see it")
 	}
+	// The panic value says what broke; the stack says where. Both have to be
+	// on the line carrying the trace ID, or the trace ID leads nowhere.
+	if !strings.Contains(line.Stack, "logging.TestMiddlewareLogsAPanickingHandler") {
+		t.Errorf("stack = %q, want it to name the frame that panicked", line.Stack)
+	}
+	line.Stack = ""
+
 	want := logLine{Level: "error", TraceID: "trace-boom", Method: "POST",
 		Path: "/api/v1/experiments/abc/analyze", Status: 500,
 		Panic: "worker: HTTP client not configured", Message: "request handled"}
 	if line != want {
 		t.Errorf("log line = %+v, want %+v", line, want)
+	}
+}
+
+// http.ErrAbortHandler is how a handler says "stop, drop the connection" on
+// purpose. net/http and chi's Recoverer both let it through untouched -- no
+// 500 is ever sent -- so logging it as an error would report an outage that
+// did not happen.
+func TestMiddlewareDoesNotLogADeliberateAbortAsAnError(t *testing.T) {
+	_, line, panicked := serve(t, httptest.NewRequest("GET", "/stream", nil),
+		func(http.ResponseWriter, *http.Request) { panic(http.ErrAbortHandler) })
+
+	// Still re-raised: only the level and status change. net/http relies on
+	// receiving it to drop the connection quietly.
+	if !panicked {
+		t.Error("http.ErrAbortHandler was swallowed; net/http needs it to abort the connection")
+	}
+	if line.Level != "info" {
+		t.Errorf("level = %q, want info (an abort is not a fault)", line.Level)
+	}
+	if line.Status != 200 {
+		t.Errorf("status = %d, want 200 (an abort must not be logged as a 500)", line.Status)
+	}
+	if line.Panic != "" || line.Stack != "" {
+		t.Errorf("panic/stack = %q/%q, want both empty", line.Panic, line.Stack)
 	}
 }
 

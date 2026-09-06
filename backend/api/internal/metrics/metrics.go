@@ -15,6 +15,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+
+	"analyseapp/api/internal/response"
 )
 
 var (
@@ -35,11 +37,13 @@ var (
 		[]string{"method", "route"},
 	)
 
-	// PanicsTotal counts requests whose handler panicked. Those are also
-	// counted in http_requests_total as status 500 -- that is what an alert
-	// on status=~"5.." needs -- so this exists to tell them apart from a 500
-	// the code chose to return.
-	PanicsTotal = promauto.NewCounterVec(
+	// panicsTotal counts requests whose handler panicked. Those are usually
+	// counted in http_requests_total as status 500 too -- that is what an
+	// alert on status=~"5.." needs -- so this exists to tell them apart from
+	// a 500 the code chose to return. It is also the only signal for a panic
+	// raised after the response header was already sent, which keeps the
+	// status the client saw and so never reaches a 5xx alert.
+	panicsTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "http_panics_total",
 			Help: "Total HTTP requests whose handler panicked, labeled by method and route pattern.",
@@ -80,7 +84,7 @@ func Handler() http.Handler {
 func Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		sw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
+		sw := response.NewStatusWriter(w)
 
 		defer func() {
 			rec := recover()
@@ -90,17 +94,23 @@ func Middleware(next http.Handler) http.Handler {
 					route = pattern
 				}
 			}
-			if rec != nil {
-				PanicsTotal.WithLabelValues(r.Method, route).Inc()
-				// Recoverer will send the 500 -- unless the handler had
-				// already written a header, in which case the status the
-				// client saw is the one already recorded.
-				if !sw.wroteHeader {
-					sw.status = http.StatusInternalServerError
-				}
+
+			// An ErrAbortHandler panic is a deliberate abort, not a fault:
+			// net/http and chi's Recoverer both let it through untouched, so
+			// no 500 is ever sent and there is no panic to report. Compared
+			// by identity because that is the test both of them apply -- a
+			// wrapped value is not an abort to them either, so it must not
+			// be one here. It is still re-raised: only the accounting
+			// changes, never the control flow.
+			fault := rec
+			if fault == http.ErrAbortHandler {
+				fault = nil
+			}
+			if fault != nil {
+				panicsTotal.WithLabelValues(r.Method, route).Inc()
 			}
 
-			requestsTotal.WithLabelValues(r.Method, route, strconv.Itoa(sw.status)).Inc()
+			requestsTotal.WithLabelValues(r.Method, route, strconv.Itoa(sw.ObservedStatus(fault))).Inc()
 			requestDuration.WithLabelValues(r.Method, route).Observe(time.Since(start).Seconds())
 
 			if rec != nil {
@@ -110,27 +120,4 @@ func Middleware(next http.Handler) http.Handler {
 
 		next.ServeHTTP(sw, r)
 	})
-}
-
-// statusWriter remembers the status the client was actually sent. status
-// starts at 200 because a handler that only calls Write sends one
-// implicitly; wroteHeader separates that from a handler that panicked
-// before sending anything, whose 200 would be a fiction.
-type statusWriter struct {
-	http.ResponseWriter
-	status      int
-	wroteHeader bool
-}
-
-func (sw *statusWriter) WriteHeader(status int) {
-	if !sw.wroteHeader {
-		sw.status = status
-		sw.wroteHeader = true
-	}
-	sw.ResponseWriter.WriteHeader(status)
-}
-
-func (sw *statusWriter) Write(b []byte) (int, error) {
-	sw.wroteHeader = true
-	return sw.ResponseWriter.Write(b)
 }

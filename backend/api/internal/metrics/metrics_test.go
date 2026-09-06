@@ -84,9 +84,12 @@ func TestMiddlewareRecordsAPanickingHandler(t *testing.T) {
 	requests := `http_requests_total{method="GET",route="` + route + `",status="500"}`
 	panics := `http_panics_total{method="GET",route="` + route + `"}`
 
+	durations := `http_request_duration_seconds_count{method="GET",route="` + route + `"}`
+
 	before := scrape(t)
 	wantRequests := counterValue(t, before, requests) + 1
 	wantPanics := counterValue(t, before, panics) + 1
+	wantDurations := counterValue(t, before, durations) + 1
 
 	r := chi.NewRouter()
 	r.Use(Middleware)
@@ -112,9 +115,8 @@ func TestMiddlewareRecordsAPanickingHandler(t *testing.T) {
 	}
 	// The latency of a failed request is still latency, and a histogram that
 	// silently drops its worst samples misreports the ones it keeps.
-	durations := `http_request_duration_seconds_count{method="GET",route="` + route + `"}`
-	if got := counterValue(t, after, durations); got != 1 {
-		t.Errorf("%s = %v, want 1", durations, got)
+	if got := counterValue(t, after, durations); got != wantDurations {
+		t.Errorf("%s = %v, want %v", durations, got, wantDurations)
 	}
 }
 
@@ -168,5 +170,50 @@ func TestMiddlewareRecordsTheStatusTheClientSaw(t *testing.T) {
 				t.Errorf("%s = %v, want %v (the status recorded was not the one the client saw)", sample, got, want)
 			}
 		})
+	}
+}
+
+// http.ErrAbortHandler is how a handler says "stop, drop the connection"
+// on purpose. net/http and chi's Recoverer both let it through untouched --
+// no 500 is ever sent -- so counting it as a panicked 500 would invent an
+// outage out of a deliberate abort.
+func TestMiddlewareDoesNotCountADeliberateAbortAsAPanic(t *testing.T) {
+	const route = "/aborts"
+	requests := `http_requests_total{method="GET",route="` + route + `",status="200"}`
+	panics := `http_panics_total{method="GET",route="` + route + `"}`
+	faults := `http_requests_total{method="GET",route="` + route + `",status="500"}`
+
+	before := scrape(t)
+	wantRequests := counterValue(t, before, requests) + 1
+	wantPanics := counterValue(t, before, panics)
+	wantFaults := counterValue(t, before, faults)
+
+	r := chi.NewRouter()
+	r.Use(Middleware)
+	// Nothing is written first, so without the abort guard ObservedStatus
+	// would rewrite the status to 500 and this would be indistinguishable
+	// from a crash.
+	r.Get(route, func(http.ResponseWriter, *http.Request) { panic(http.ErrAbortHandler) })
+
+	func() {
+		defer func() {
+			// Still re-raised: only the accounting changes. net/http relies
+			// on receiving it to drop the connection quietly.
+			if rec := recover(); rec != http.ErrAbortHandler {
+				t.Errorf("recover() = %v, want http.ErrAbortHandler to be re-raised", rec)
+			}
+		}()
+		r.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", route, nil))
+	}()
+
+	after := scrape(t)
+	if got := counterValue(t, after, requests); got != wantRequests {
+		t.Errorf("%s = %v, want %v (the request itself is still counted)", requests, got, wantRequests)
+	}
+	if got := counterValue(t, after, panics); got != wantPanics {
+		t.Errorf("%s = %v, want %v (an abort is not a panic)", panics, got, wantPanics)
+	}
+	if got := counterValue(t, after, faults); got != wantFaults {
+		t.Errorf("%s = %v, want %v (an abort must not be recorded as a 500)", faults, got, wantFaults)
 	}
 }

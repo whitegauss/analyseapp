@@ -5,11 +5,14 @@ import (
 	"context"
 	"net/http"
 	"os"
+	"runtime/debug"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+
+	"analyseapp/api/internal/response"
 )
 
 type ctxKey string
@@ -51,26 +54,40 @@ func Middleware(next http.Handler) http.Handler {
 		ctx := context.WithValue(r.Context(), traceIDKey, traceID)
 		w.Header().Set("X-Trace-Id", traceID)
 
-		sw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
+		sw := response.NewStatusWriter(w)
 
 		defer func() {
 			rec := recover()
+
+			// An ErrAbortHandler panic is a deliberate abort, not a fault:
+			// net/http and chi's Recoverer both let it through untouched, so
+			// no 500 is ever sent and there is nothing to report as an
+			// error. Compared by identity because that is the test both of
+			// them apply -- a wrapped value is not an abort to them either,
+			// so it must not be one here. It is still re-raised: only the
+			// log level and status change, never the control flow.
+			fault := rec
+			if fault == http.ErrAbortHandler {
+				fault = nil
+			}
+
 			event := log.Info()
-			if rec != nil {
-				// Recoverer will send the 500 -- unless the handler had
-				// already written a header, in which case the status the
-				// client saw is the one already recorded.
-				if !sw.wroteHeader {
-					sw.status = http.StatusInternalServerError
-				}
-				event = log.Error().Interface("panic", rec)
+			if fault != nil {
+				// The panic value alone says what broke but not where.
+				// debug.Stack() called from the recovering defer still
+				// unwinds through the panicking frames, so the handler that
+				// raised it is in here -- carried on the same line as the
+				// trace ID, which is what makes it findable later.
+				event = log.Error().
+					Interface("panic", fault).
+					Bytes("stack", debug.Stack())
 			}
 
 			event.
 				Str("trace_id", traceID).
 				Str("method", r.Method).
 				Str("path", r.URL.Path).
-				Int("status", sw.status).
+				Int("status", sw.ObservedStatus(fault)).
 				Dur("duration", time.Since(start)).
 				Msg("request handled")
 
@@ -81,27 +98,4 @@ func Middleware(next http.Handler) http.Handler {
 
 		next.ServeHTTP(sw, r.WithContext(ctx))
 	})
-}
-
-// statusWriter remembers the status the client was actually sent. status
-// starts at 200 because a handler that only calls Write sends one
-// implicitly; wroteHeader separates that from a handler that panicked
-// before sending anything, whose 200 would be a fiction.
-type statusWriter struct {
-	http.ResponseWriter
-	status      int
-	wroteHeader bool
-}
-
-func (sw *statusWriter) WriteHeader(status int) {
-	if !sw.wroteHeader {
-		sw.status = status
-		sw.wroteHeader = true
-	}
-	sw.ResponseWriter.WriteHeader(status)
-}
-
-func (sw *statusWriter) Write(b []byte) (int, error) {
-	sw.wroteHeader = true
-	return sw.ResponseWriter.Write(b)
 }
