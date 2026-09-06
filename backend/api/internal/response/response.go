@@ -1,6 +1,8 @@
 // Package response provides the unified API response envelope
 // (PDR.md section 8: {data, error, meta}), shared by httpserver and auth so
-// neither has to import the other.
+// neither has to import the other. StatusWriter lives here for the same
+// reason: logging and metrics both need it and neither should import the
+// other.
 package response
 
 import (

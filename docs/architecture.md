@@ -34,7 +34,7 @@ backend/api/       Go — API Gateway / BFF
 | `internal/experiments` `internal/projects` | SQL を持つリポジトリ + `Store` インターフェース            | Postgres  |
 | `internal/cache`                           | キー導出 + `Cache` インターフェース + Redis 実装           | Redis     |
 | `internal/worker`                          | ワーカーへの HTTP クライアント + `Client` インターフェース | HTTP      |
-| `internal/response`                        | `{data, error, meta}` エンベロープの整形                   | —         |
+| `internal/response`                        | `{data, error, meta}` エンベロープの整形 + `StatusWriter`  | —         |
 | `internal/logging` `internal/metrics`      | トレース ID、構造化ログ、Prometheus                        | stdout    |
 | `internal/config`                          | 環境変数 → `Config`                                        | —         |
 
