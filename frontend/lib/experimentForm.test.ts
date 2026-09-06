@@ -114,6 +114,37 @@ describe("parseColumnsField", () => {
     });
   });
 
+  it("keeps a column named __proto__ instead of silently dropping it", () => {
+    // JSON.parse gives "__proto__" as a real own property, so it passes the
+    // shape check like any other column. Copying it into a normal object
+    // then hits Object.prototype's setter rather than defining a property:
+    // the column vanishes from the result and the map's prototype is
+    // replaced by the array. Object.prototype itself is never touched, so
+    // what this guards is the silent data loss.
+    const result = parseColumnsField('{"x":[1],"y":[2],"__proto__":[3]}');
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // Bracket access and Object.keys both read own properties, which is what
+    // makes the difference visible -- `.__proto__` on a plain object would
+    // follow the prototype instead.
+    expect(Object.keys(result.columns).sort()).toEqual(["__proto__", "x", "y"]);
+    expect(result.columns["__proto__"]).toEqual([3]);
+    // The map has to stay a plain string->number[] map, not become an array.
+    expect(Array.isArray(result.columns)).toBe(false);
+    // And it must survive the trip to the API, which is a JSON.stringify.
+    expect(JSON.parse(JSON.stringify(result.columns))["__proto__"]).toEqual([
+      3,
+    ]);
+  });
+
+  it("rejects a __proto__ column that is not valid data", () => {
+    // The same predicate has to apply to it as to every other column.
+    expect(parseColumnsField('{"x":[1],"y":[2],"__proto__":"nope"}').ok).toBe(
+      false,
+    );
+  });
+
   it("accepts negative and fractional values", () => {
     // Nothing here is about the sign or magnitude of the data -- only its
     // shape -- so ordinary physics numbers must still go through.

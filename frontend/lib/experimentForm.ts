@@ -60,7 +60,13 @@ export function parseColumnsField(
   // Extra columns (y_error, x_error, anything custom) go through the same
   // predicate. Skipping them would leave the return type lying about exactly
   // the columns nobody thought to check.
-  const checked: Record<string, number[]> = {};
+  // Null-prototype because the keys come from the request. On a normal
+  // object, `checked["__proto__"] = column` reaches Object.prototype's
+  // setter instead of defining a property: the column is silently dropped
+  // -- after passing validation -- and this map's prototype is replaced by
+  // the array. (Object.prototype itself is untouched, so the damage is the
+  // missing column, not pollution.)
+  const checked: Record<string, number[]> = Object.create(null);
   for (const [name, column] of Object.entries(columns)) {
     if (!isDataColumn(column)) {
       return { ok: false, error: `${name}列に数値以外の値が含まれています` };
