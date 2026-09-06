@@ -33,14 +33,44 @@ func WithUserID(ctx context.Context, userID uuid.UUID) context.Context {
 	return context.WithValue(ctx, userIDKey, userID)
 }
 
+// ErrNoJWKSKeys is returned by NewJWKS when the endpoint answers but carries
+// no keys. Nothing would fail at startup in that case and every authenticated
+// request would 401, which reads as an auth bug rather than a bad
+// SUPABASE_URL.
+var ErrNoJWKSKeys = errors.New("no keys in the JWK Set")
+
 // NewJWKS fetches and keeps in sync the Supabase project's JSON Web Key Set,
 // used to verify the asymmetric (ES256) JWTs Supabase Auth issues by
 // default. Call once at startup; the returned Keyfunc auto-refreshes keys.
+//
+// It reports a failure to reach or read the key set, so that a wrong
+// SUPABASE_URL stops the process instead of producing a server that starts,
+// mounts /api/v1, and 401s every request (KAN-53). Two things are needed for
+// that, because keyfunc is built to survive a JWKS endpoint being down at any
+// point *after* startup:
+//
+//   - NoErrorReturnFirstHTTPReq is overridden to false. It defaults to true,
+//     which is what swallowed the connection-refused / DNS / 500 cases: the
+//     first fetch's error was logged and a Keyfunc returned anyway.
+//   - The key set is read back. A 200 carrying zero keys is not an HTTP
+//     error, so the override alone would still let an empty JWKS through.
 func NewJWKS(ctx context.Context, supabaseURL string) (keyfunc.Keyfunc, error) {
 	jwksURL := strings.TrimRight(supabaseURL, "/") + "/auth/v1/.well-known/jwks.json"
-	k, err := keyfunc.NewDefaultCtx(ctx, []string{jwksURL})
+
+	reportFirstFetch := false
+	k, err := keyfunc.NewDefaultOverrideCtx(ctx, []string{jwksURL}, keyfunc.Override{
+		NoErrorReturnFirstHTTPReq: &reportFirstFetch,
+	})
 	if err != nil {
 		return nil, wrapJWKSErr(supabaseURL, err)
+	}
+
+	keys, err := k.Storage().KeyReadAll(ctx)
+	if err != nil {
+		return nil, wrapJWKSErr(supabaseURL, err)
+	}
+	if len(keys) == 0 {
+		return nil, wrapJWKSErr(supabaseURL, ErrNoJWKSKeys)
 	}
 	return k, nil
 }

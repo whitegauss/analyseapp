@@ -8,9 +8,12 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
+	"time"
 )
 
 // Client sends an analysis request to the worker and returns its raw HTTP
@@ -19,19 +22,63 @@ type Client interface {
 	Analyze(ctx context.Context, traceID string, body []byte) (status int, respBody []byte, err error)
 }
 
-// HTTPClient is the real Client implementation, backed by net/http. HTTP is
-// required: the timeout on it is the only bound on how long an analysis
-// request can occupy a handler, so there is no default to fall back to.
+// HTTPClient is the real Client implementation, backed by net/http. Build it
+// with NewHTTPClient: the fields are unexported so that a client which cannot
+// work -- no HTTP client, or a base URL nothing can be sent to -- cannot be
+// constructed from outside this package (KAN-64).
 type HTTPClient struct {
-	BaseURL string
-	HTTP    *http.Client
+	baseURL string
+	http    *http.Client
 }
 
-// ErrNoHTTPClient is returned by Analyze when HTTPClient.HTTP is nil, rather
-// than letting the nil dereference panic. A panic here reaches the caller as
-// middleware.Recoverer's bare 500, which says nothing about the cause;
-// analyze.go maps this error to a 502 that names it.
+// ErrNoHTTPClient is returned by Analyze when the http client is nil, rather
+// than letting the nil dereference panic. NewHTTPClient rules that out, but
+// the zero value is still reachable inside this package, and a panic here
+// reaches the caller as middleware.Recoverer's bare 500, which says nothing
+// about the cause; analyze.go maps this error to a 502 that names it.
 var ErrNoHTTPClient = errors.New("worker: HTTP client not configured")
+
+// NewHTTPClient builds a Client for the worker at baseURL, giving every
+// request the same timeout -- which is the only bound on how long an analysis
+// can occupy a handler, so there is no zero value to fall back to.
+//
+// baseURL is validated here rather than at send time. It comes from
+// WORKER_BASE_URL, which has a default and so always lets the process start;
+// a broken value used to surface once per request as a 502
+// worker_unreachable, which reads as "the worker is down" and points an
+// investigation at the wrong thing (KAN-62).
+func NewHTTPClient(baseURL string, timeout time.Duration) (*HTTPClient, error) {
+	if err := ValidateBaseURL(baseURL); err != nil {
+		return nil, err
+	}
+	return &HTTPClient{baseURL: baseURL, http: &http.Client{Timeout: timeout}}, nil
+}
+
+// ValidateBaseURL reports whether raw is a URL the worker can actually be
+// reached at. Exported so a caller can check a configured value and name the
+// variable it came from in the failure.
+func ValidateBaseURL(raw string) error {
+	if raw == "" {
+		return fmt.Errorf("%w: it is empty", ErrInvalidBaseURL)
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("%w: %q cannot be parsed: %w", ErrInvalidBaseURL, raw, err)
+	}
+	// A scheme net/http cannot send over fails inside Do, far from the
+	// mistake; "worker:8001" parses cleanly as scheme "worker".
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("%w: %q needs an http:// or https:// scheme", ErrInvalidBaseURL, raw)
+	}
+	if u.Host == "" {
+		return fmt.Errorf("%w: %q has no host", ErrInvalidBaseURL, raw)
+	}
+	return nil
+}
+
+// ErrInvalidBaseURL is returned by NewHTTPClient and ValidateBaseURL for a
+// base URL no request could be sent to.
+var ErrInvalidBaseURL = errors.New("worker: invalid base URL")
 
 // analyzeURL joins the worker's base URL with the /analyze path. BaseURL comes
 // from WORKER_BASE_URL and may or may not carry a trailing slash, so trailing
@@ -41,11 +88,11 @@ func analyzeURL(baseURL string) string {
 }
 
 func (c *HTTPClient) Analyze(ctx context.Context, traceID string, body []byte) (int, []byte, error) {
-	if c.HTTP == nil {
+	if c.http == nil {
 		return 0, nil, ErrNoHTTPClient
 	}
-	url := analyzeURL(c.BaseURL)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	endpoint := analyzeURL(c.baseURL)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return 0, nil, err
 	}
@@ -54,7 +101,7 @@ func (c *HTTPClient) Analyze(ctx context.Context, traceID string, body []byte) (
 		req.Header.Set("X-Trace-Id", traceID)
 	}
 
-	resp, err := c.HTTP.Do(req)
+	resp, err := c.http.Do(req)
 	if err != nil {
 		return 0, nil, err
 	}

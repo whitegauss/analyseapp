@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -232,43 +233,58 @@ func TestNewJWKSTrailingSlash(t *testing.T) {
 	}
 }
 
-// NewJWKS only reports an error for a URL it cannot parse. An endpoint that is
-// refused, unresolvable, or answering 500 is NOT reported, because keyfunc logs
-// the failure and hands back a Keyfunc that fails per-request instead.
-//
-// That matters: cmd/api/main.go:41-43 calls log.Fatal on this error, so it reads
-// as "refuse to start without a working JWKS" — but with a wrong SUPABASE_URL
-// the server starts, mounts /api/v1, and 401s every request. Pinned here as
-// today's behaviour; fixing the startup check is KAN-53.
-func TestNewJWKSReportsOnlyMalformedURLs(t *testing.T) {
+// A wrong SUPABASE_URL has to stop the process. cmd/api/main.go calls
+// log.Fatal on this error, which only means "refuse to start without a
+// working JWKS" if the error actually arrives -- it used to be swallowed for
+// every failure except an unparseable URL, so the server started, mounted
+// /api/v1, and 401d every request (KAN-53).
+func TestNewJWKSReportsAnUnusableEndpoint(t *testing.T) {
 	failing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "nope", http.StatusInternalServerError)
 	}))
 	defer failing.Close()
 
-	unreported := []struct {
-		name string
-		url  string
+	// A 200 with a well-formed but empty key set: not an HTTP failure, so
+	// only reading the keys back catches it.
+	empty := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"keys":[]}`))
+	}))
+	defer empty.Close()
+
+	tests := []struct {
+		name, url string
 	}{
 		{name: "endpoint returns 500", url: failing.URL},
 		{name: "connection refused", url: "http://127.0.0.1:1"},
 		{name: "host does not resolve", url: "http://not-a-real-host.invalid"},
+		{name: "endpoint answers with no keys", url: empty.URL},
+		{name: "malformed url", url: "://malformed"},
 	}
-	for _, tt := range unreported {
+	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if _, err := NewJWKS(context.Background(), tt.url); err != nil {
-				t.Errorf("err = %v, want nil (startup does not detect this today)", err)
+			_, err := NewJWKS(context.Background(), tt.url)
+			if err == nil {
+				t.Fatal("err = nil, want startup to fail on an unusable JWKS endpoint")
+			}
+			// The operator has to be able to tell which value is wrong.
+			if !strings.Contains(err.Error(), tt.url) {
+				t.Errorf("err = %v, want it to name the URL it tried (%q)", err, tt.url)
 			}
 		})
 	}
+}
 
-	t.Run("malformed url", func(t *testing.T) {
-		_, err := NewJWKS(context.Background(), "://malformed")
-		if err == nil {
-			t.Fatal("err = nil, want an error for an unparseable URL")
-		}
-		if !strings.Contains(err.Error(), "://malformed") {
-			t.Errorf("err = %v, want it to name the URL it tried", err)
-		}
-	})
+func TestNewJWKSEmptyKeySetIsDistinguishable(t *testing.T) {
+	empty := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"keys":[]}`))
+	}))
+	defer empty.Close()
+
+	// "reachable but empty" is a different fix from "unreachable", so it is
+	// worth a sentinel rather than only a message.
+	if _, err := NewJWKS(context.Background(), empty.URL); !errors.Is(err, ErrNoJWKSKeys) {
+		t.Errorf("err = %v, want it to wrap ErrNoJWKSKeys", err)
+	}
 }
