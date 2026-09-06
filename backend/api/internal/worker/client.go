@@ -73,6 +73,17 @@ func ValidateBaseURL(raw string) error {
 	if u.Host == "" {
 		return fmt.Errorf("%w: %q has no host", ErrInvalidBaseURL, raw)
 	}
+	// analyzeURL appends "/analyze" to this string, so anything that ends the
+	// path swallows it: "http://worker:8001?debug=1" becomes a request to "/"
+	// carrying the query "debug=1/analyze", and the worker never sees
+	// /analyze at all. Checked on the raw string rather than u.RawQuery /
+	// u.ForceQuery / u.Fragment because a bare trailing "#" breaks the join
+	// just the same but leaves every one of those fields zero -- net/url has
+	// no ForceFragment to tell it from a clean URL.
+	if i := strings.IndexAny(raw, "?#"); i >= 0 {
+		return fmt.Errorf("%w: %q must not carry a query or fragment (found %q at byte %d)",
+			ErrInvalidBaseURL, raw, raw[i], i)
+	}
 	return nil
 }
 

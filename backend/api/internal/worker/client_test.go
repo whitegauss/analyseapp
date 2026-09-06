@@ -251,6 +251,15 @@ func TestValidateBaseURL(t *testing.T) {
 		{name: "scheme only", baseURL: "http://", wantErrContains: "has no host"},
 		// A control character is what makes url.Parse itself fail.
 		{name: "a control character", baseURL: "http://worker:8001\x7f", wantErrContains: "cannot be parsed"},
+		// analyzeURL appends "/analyze", so a query or fragment swallows it:
+		// the request lands on "/" and the worker never sees /analyze.
+		{name: "a query string", baseURL: "http://worker:8001?debug=1", wantErrContains: "query or fragment"},
+		{name: "a query on a path prefix", baseURL: "http://worker:8001/api?x=1", wantErrContains: "query or fragment"},
+		{name: "a fragment", baseURL: "http://worker:8001#frag", wantErrContains: "query or fragment"},
+		// A bare "?" leaves RawQuery empty (only ForceQuery is set) and a bare
+		// "#" leaves every parsed field zero, yet both break the join.
+		{name: "a bare question mark", baseURL: "http://worker:8001?", wantErrContains: "query or fragment"},
+		{name: "a bare hash", baseURL: "http://worker:8001#", wantErrContains: "query or fragment"},
 	}
 
 	for _, tt := range tests {
