@@ -20,6 +20,10 @@ import (
 	"analyseapp/api/internal/worker"
 )
 
+// workerTimeout bounds how long a single analysis request may occupy a
+// handler.
+const workerTimeout = 10 * time.Second
+
 func main() {
 	logging.Init()
 	cfg := config.Load()
@@ -47,9 +51,13 @@ func main() {
 		log.Warn().Msg("SUPABASE_URL not set; /api/v1 routes will not be mounted")
 	}
 
-	workerClient := &worker.HTTPClient{
-		BaseURL: cfg.WorkerBaseURL,
-		HTTP:    &http.Client{Timeout: 10 * time.Second},
+	// WORKER_BASE_URL has a default, so any value at all lets the process
+	// start. Validated here so a broken one stops startup with the variable
+	// named, instead of surfacing once per request as a 502 that reads as
+	// "the worker is down" (KAN-62).
+	workerClient, err := worker.NewHTTPClient(cfg.WorkerBaseURL, workerTimeout)
+	if err != nil {
+		log.Fatal().Err(err).Str("WORKER_BASE_URL", cfg.WorkerBaseURL).Msg("invalid worker base URL")
 	}
 
 	redisClient := redis.NewClient(&redis.Options{Addr: cfg.RedisAddr})

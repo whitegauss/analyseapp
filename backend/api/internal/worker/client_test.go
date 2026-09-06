@@ -3,9 +3,11 @@ package worker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -79,7 +81,7 @@ func TestHTTPClientAnalyzeRequest(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			srv, got := newWorkerStub(t, http.StatusOK, `{"data":{}}`)
-			c := &HTTPClient{BaseURL: srv.URL + tt.suffix, HTTP: srv.Client()}
+			c := &HTTPClient{baseURL: srv.URL + tt.suffix, http: srv.Client()}
 
 			if _, _, err := c.Analyze(context.Background(), tt.traceID, []byte(body)); err != nil {
 				t.Fatalf("Analyze: %v", err)
@@ -112,7 +114,7 @@ func TestHTTPClientAnalyzePassesTheWorkerResponseThrough(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			srv, _ := newWorkerStub(t, tt.status, tt.body)
-			c := &HTTPClient{BaseURL: srv.URL, HTTP: srv.Client()}
+			c := &HTTPClient{baseURL: srv.URL, http: srv.Client()}
 
 			status, respBody, err := c.Analyze(context.Background(), "trace-1", []byte(`{"type":"x"}`))
 			if err != nil {
@@ -147,7 +149,7 @@ func TestHTTPClientAnalyzeFailures(t *testing.T) {
 		{name: "an unreachable worker returns an error", baseURL: closed.URL},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			c := &HTTPClient{BaseURL: tt.baseURL, HTTP: &http.Client{}}
+			c := &HTTPClient{baseURL: tt.baseURL, http: &http.Client{}}
 			status, respBody, err := c.Analyze(context.Background(), "trace-1", []byte(`{}`))
 			assertNoResponse(t, status, respBody, err)
 		})
@@ -158,7 +160,7 @@ func TestHTTPClientAnalyzeFailures(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 
-		c := &HTTPClient{BaseURL: srv.URL, HTTP: srv.Client()}
+		c := &HTTPClient{baseURL: srv.URL, http: srv.Client()}
 		status, respBody, err := c.Analyze(ctx, "trace-1", []byte(`{}`))
 		assertNoResponse(t, status, respBody, err)
 		if !errors.Is(err, context.Canceled) {
@@ -173,7 +175,7 @@ func TestHTTPClientAnalyzeFailures(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { <-release }))
 		t.Cleanup(func() { close(release); srv.Close() })
 
-		c := &HTTPClient{BaseURL: srv.URL, HTTP: &http.Client{Timeout: 50 * time.Millisecond}}
+		c := &HTTPClient{baseURL: srv.URL, http: &http.Client{Timeout: 50 * time.Millisecond}}
 		status, respBody, err := c.Analyze(context.Background(), "trace-1", []byte(`{}`))
 		assertNoResponse(t, status, respBody, err)
 		if !errors.Is(err, context.DeadlineExceeded) {
@@ -193,7 +195,7 @@ func TestHTTPClientAnalyzeFailures(t *testing.T) {
 		}))
 		t.Cleanup(srv.Close)
 
-		c := &HTTPClient{BaseURL: srv.URL, HTTP: srv.Client()}
+		c := &HTTPClient{baseURL: srv.URL, http: srv.Client()}
 		status, respBody, err := c.Analyze(context.Background(), "trace-1", []byte(`{}`))
 		assertNoResponse(t, status, respBody, err)
 	})
@@ -216,7 +218,7 @@ func TestAnalyzeReportsAMissingHTTPClientInsteadOfPanicking(t *testing.T) {
 		}
 	}()
 
-	c := &HTTPClient{BaseURL: "http://worker.invalid"}
+	c := &HTTPClient{baseURL: "http://worker.invalid"}
 	status, body, err := c.Analyze(context.Background(), "trace-1", []byte(`{}`))
 
 	if !errors.Is(err, ErrNoHTTPClient) {
@@ -225,4 +227,112 @@ func TestAnalyzeReportsAMissingHTTPClientInsteadOfPanicking(t *testing.T) {
 	if status != 0 || body != nil {
 		t.Errorf("Analyze = %d, %q, want no status and no body alongside the error", status, body)
 	}
+}
+
+// WORKER_BASE_URL has a default, so a broken value never stopped startup: it
+// surfaced once per request as a 502 worker_unreachable, which reads as "the
+// worker is down" and sends an investigation the wrong way (KAN-62).
+func TestValidateBaseURL(t *testing.T) {
+	tests := []struct {
+		name, baseURL, wantErrContains string
+	}{
+		{name: "a plain host and port", baseURL: "http://worker:8001"},
+		{name: "https", baseURL: "https://worker.example.com"},
+		{name: "a trailing slash", baseURL: "http://worker:8001/"},
+		{name: "a path prefix", baseURL: "http://worker:8001/api"},
+		{name: "localhost, the default", baseURL: "http://localhost:8001"},
+
+		// Each of these used to reach Analyze and fail there instead.
+		{name: "empty", baseURL: "", wantErrContains: "it is empty"},
+		// Parses cleanly with scheme "worker", then fails inside Do with
+		// "unsupported protocol scheme".
+		{name: "no scheme", baseURL: "worker:8001", wantErrContains: "http:// or https://"},
+		{name: "a scheme net/http cannot send", baseURL: "ftp://worker:8001", wantErrContains: "http:// or https://"},
+		{name: "scheme only", baseURL: "http://", wantErrContains: "has no host"},
+		// A control character is what makes url.Parse itself fail.
+		{name: "a control character", baseURL: "http://worker:8001\x7f", wantErrContains: "cannot be parsed"},
+		// analyzeURL appends "/analyze", so a query or fragment swallows it:
+		// the request lands on "/" and the worker never sees /analyze.
+		{name: "a query string", baseURL: "http://worker:8001?debug=1", wantErrContains: "query or fragment"},
+		{name: "a query on a path prefix", baseURL: "http://worker:8001/api?x=1", wantErrContains: "query or fragment"},
+		{name: "a fragment", baseURL: "http://worker:8001#frag", wantErrContains: "query or fragment"},
+		// A bare "?" leaves RawQuery empty (only ForceQuery is set) and a bare
+		// "#" leaves every parsed field zero, yet both break the join.
+		{name: "a bare question mark", baseURL: "http://worker:8001?", wantErrContains: "query or fragment"},
+		{name: "a bare hash", baseURL: "http://worker:8001#", wantErrContains: "query or fragment"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateBaseURL(tt.baseURL)
+
+			if tt.wantErrContains == "" {
+				if err != nil {
+					t.Fatalf("ValidateBaseURL(%q) = %v, want nil", tt.baseURL, err)
+				}
+				return
+			}
+			if !errors.Is(err, ErrInvalidBaseURL) {
+				t.Fatalf("ValidateBaseURL(%q) = %v, want it to wrap ErrInvalidBaseURL", tt.baseURL, err)
+			}
+			// The operator has to be able to tell what is wrong with the
+			// value, not just that something is.
+			if !strings.Contains(err.Error(), tt.wantErrContains) {
+				t.Errorf("err = %v, want it to mention %q", err, tt.wantErrContains)
+			}
+			// Quoted with %q, so a control character appears escaped rather
+			// than raw -- which is what makes it readable in a log at all.
+			if tt.baseURL != "" && !strings.Contains(err.Error(), fmt.Sprintf("%q", tt.baseURL)) {
+				t.Errorf("err = %v, want it to quote the offending value", err)
+			}
+		})
+	}
+}
+
+func TestNewHTTPClient(t *testing.T) {
+	t.Run("rejects a base URL nothing could be sent to", func(t *testing.T) {
+		c, err := NewHTTPClient("worker:8001", time.Second)
+		if !errors.Is(err, ErrInvalidBaseURL) {
+			t.Errorf("err = %v, want it to wrap ErrInvalidBaseURL", err)
+		}
+		if c != nil {
+			t.Error("a client was returned alongside the error")
+		}
+	})
+
+	t.Run("behaves like a hand-built client", func(t *testing.T) {
+		srv, got := newWorkerStub(t, http.StatusOK, `{"data":{}}`)
+
+		c, err := NewHTTPClient(srv.URL, 10*time.Second)
+		if err != nil {
+			t.Fatalf("NewHTTPClient: %v", err)
+		}
+		status, body, err := c.Analyze(context.Background(), "trace-1", []byte(`{"type":"x"}`))
+		if err != nil {
+			t.Fatalf("Analyze: %v", err)
+		}
+		if status != http.StatusOK || string(body) != `{"data":{}}` {
+			t.Errorf("Analyze = %d, %q, want 200 and the stub's body", status, body)
+		}
+		if got.path != "/analyze" || got.traceID != "trace-1" {
+			t.Errorf("request = %+v, want /analyze with the trace id forwarded", *got)
+		}
+	})
+
+	t.Run("applies the timeout it was given", func(t *testing.T) {
+		// The timeout is the only bound on how long an analysis can occupy a
+		// handler, so a constructor that dropped it would be worse than the
+		// struct literal it replaces.
+		release := make(chan struct{})
+		srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { <-release }))
+		t.Cleanup(func() { close(release); srv.Close() })
+
+		c, err := NewHTTPClient(srv.URL, 50*time.Millisecond)
+		if err != nil {
+			t.Fatalf("NewHTTPClient: %v", err)
+		}
+		if _, _, err := c.Analyze(context.Background(), "trace-1", []byte(`{}`)); !errors.Is(err, context.DeadlineExceeded) {
+			t.Errorf("err = %v, want it to wrap context.DeadlineExceeded", err)
+		}
+	})
 }
