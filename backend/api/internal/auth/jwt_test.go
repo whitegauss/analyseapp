@@ -21,6 +21,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
+	"analyseapp/api/internal/logging"
 	"analyseapp/api/internal/response"
 )
 
@@ -263,6 +264,9 @@ func TestMiddlewareDoesNotLeakParseErrorDetail(t *testing.T) {
 
 // The detail is not discarded, only moved: without it in the log there is no
 // way to tell an expired token from a forged one when a user reports a 401.
+// The line is only useful if it carries the same trace id as the request it
+// rejected, so this runs through logging.Middleware -- the real chain -- and
+// checks the id that comes out, not merely that the field exists.
 func TestMiddlewareLogsWhyTheTokenWasRejected(t *testing.T) {
 	_, srv := newSigningKey(t)
 	jwks := newJWKS(t, srv)
@@ -276,18 +280,53 @@ func TestMiddlewareLogsWhyTheTokenWasRejected(t *testing.T) {
 		zerolog.SetGlobalLevel(savedLevel)
 	})
 
-	serve(t, jwks, "Bearer garbage")
+	const traceID = "0b6c1f9e-3c5a-4f21-9d7e-8a2b4c6d0e13"
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/experiments", nil)
+	req.Header.Set("Authorization", "Bearer garbage")
+	// logging.Middleware reuses an inbound X-Trace-Id, which is what lets the
+	// assertion below name the expected value instead of guessing a uuid.
+	req.Header.Set("X-Trace-Id", traceID)
 
-	logged := buf.String()
-	if !strings.Contains(logged, "invalid number of segments") {
-		t.Errorf("log = %q, want it to carry the parse error the body no longer does", logged)
+	next := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Error("next handler ran for a rejected request")
+	})
+	logging.Middleware(Middleware(jwks)(next)).ServeHTTP(httptest.NewRecorder(), req)
+
+	rejection, ok := findLogLine(t, buf.Bytes(), "rejected a bearer token")
+	if !ok {
+		t.Fatalf("log = %q, want a line for the rejected token", buf.String())
 	}
-	// Empty here because no logging.Middleware ran in front of this test;
-	// what matters is that the field is emitted, so the real chain has
-	// somewhere to put the id that ties this line to the request.
-	if !strings.Contains(logged, `"trace_id"`) {
-		t.Errorf("log = %q, want a trace_id field to tie it back to the request", logged)
+	if !strings.Contains(rejection.Error, "invalid number of segments") {
+		t.Errorf("error = %q, want the parse error the body no longer carries", rejection.Error)
 	}
+	if rejection.TraceID != traceID {
+		t.Errorf("trace_id = %q, want %q", rejection.TraceID, traceID)
+	}
+}
+
+// authLogLine is the subset of the JSON log record these tests assert on.
+type authLogLine struct {
+	TraceID string `json:"trace_id"`
+	Error   string `json:"error"`
+	Message string `json:"message"`
+}
+
+// findLogLine returns the logged record whose message is msg. The buffer holds
+// one JSON object per line and more than one line here, since
+// logging.Middleware records the request itself alongside the rejection.
+func findLogLine(t *testing.T, logged []byte, msg string) (authLogLine, bool) {
+	t.Helper()
+
+	for _, raw := range bytes.Split(bytes.TrimSpace(logged), []byte("\n")) {
+		var line authLogLine
+		if err := json.Unmarshal(raw, &line); err != nil {
+			t.Fatalf("decode log line %q: %v", raw, err)
+		}
+		if line.Message == msg {
+			return line, true
+		}
+	}
+	return authLogLine{}, false
 }
 
 func TestNewJWKSTrailingSlash(t *testing.T) {
