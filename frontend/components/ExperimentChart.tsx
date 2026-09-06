@@ -13,6 +13,7 @@ import {
   formatSigned,
   regressionCacheKey,
   uncertaintyBoundsAt,
+  UNKNOWN_UNCERTAINTY_TEXT,
 } from "@/lib/chart/regression";
 import { fetchRegression } from "@/app/experiments/actions";
 import {
@@ -329,11 +330,24 @@ export default function ExperimentChart({
                     {lhsText} = {slope.rounded.toFixed(slope.decimals)}
                     {xText}{" "}
                     {formatSigned(intercept.rounded, intercept.decimals)}
-                    {"　"}(slope誤差 ±
-                    {formatUncertainty(activeRegression.slope_stderr)}
-                    （1σ）, intercept誤差 ±
-                    {formatUncertainty(activeRegression.intercept_stderr)}
-                    （1σ）, R² = {activeRegression.r_squared.toFixed(4)}
+                    {"　"}(
+                    {activeRegression.slope_stderr === null ||
+                    activeRegression.intercept_stderr === null ? (
+                      // A two-point fit pins the line exactly but leaves no
+                      // residual to estimate a spread from. "± 0.0" would read
+                      // as a perfect measurement, so say what is actually
+                      // true instead.
+                      <>誤差{UNKNOWN_UNCERTAINTY_TEXT}（2点フィット）, </>
+                    ) : (
+                      <>
+                        slope誤差 ±
+                        {formatUncertainty(activeRegression.slope_stderr)}
+                        （1σ）, intercept誤差 ±
+                        {formatUncertainty(activeRegression.intercept_stderr)}
+                        （1σ）,{" "}
+                      </>
+                    )}
+                    R² = {activeRegression.r_squared.toFixed(4)}
                     {(xLogScale || yLogScale) && "（対数変換後）"}
                     {activeRegression.weighted ? "、誤差重み付き" : ""})
                   </p>

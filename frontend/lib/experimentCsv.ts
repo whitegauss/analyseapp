@@ -38,9 +38,14 @@ export function buildCsv(
   if (xLabel) lines.push(`# x_axis_label: ${xLabel}`);
   if (yLabel) lines.push(`# y_axis_label: ${yLabel}`);
   if (regression) {
+    // A two-point fit reports no standard errors; writing "± null" into the
+    // header would be worse than dropping the term, and "± 0" would claim a
+    // perfect measurement.
+    const withError = (value: number, stderr: number | null) =>
+      stderr === null ? `${value}` : `${value} ± ${stderr}`;
     lines.push(
-      `# regression: slope=${regression.slope} ± ${regression.slope_stderr}, ` +
-        `intercept=${regression.intercept} ± ${regression.intercept_stderr}, ` +
+      `# regression: slope=${withError(regression.slope, regression.slope_stderr)}, ` +
+        `intercept=${withError(regression.intercept, regression.intercept_stderr)}, ` +
         `r_squared=${regression.r_squared}, x_log=${regression.x_log}, y_log=${regression.y_log}`,
     );
   }

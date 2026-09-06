@@ -12,9 +12,13 @@ const MAX_DISPLAY_DECIMALS = 4;
 
 export function roundToUncertainty(
   value: number,
-  uncertainty: number,
+  uncertainty: number | null,
 ): { rounded: number; decimals: number } {
-  if (!Number.isFinite(uncertainty) || uncertainty <= 0) {
+  if (
+    uncertainty === null ||
+    !Number.isFinite(uncertainty) ||
+    uncertainty <= 0
+  ) {
     return { rounded: value, decimals: MAX_DISPLAY_DECIMALS };
   }
   const exponent = Math.floor(Math.log10(uncertainty));
@@ -28,8 +32,9 @@ export function roundToUncertainty(
 // A non-positive or non-finite uncertainty (e.g. from floating-point
 // cancellation, or an undefined stdev) just displays as "0.0" rather than
 // propagating NaN/Infinity or a nonsensical value.
-export function formatUncertainty(uncertainty: number): string {
-  if (!Number.isFinite(uncertainty) || uncertainty <= 0) return "0.0";
+export function formatUncertainty(uncertainty: number | null): string {
+  if (uncertainty === null || !Number.isFinite(uncertainty) || uncertainty <= 0)
+    return "0.0";
   const { rounded, decimals } = roundToUncertainty(uncertainty, uncertainty);
   return rounded.toFixed(decimals);
 }

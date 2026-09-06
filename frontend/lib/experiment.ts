@@ -9,8 +9,11 @@
 export type LinearRegressionResult = {
   slope: number;
   intercept: number;
-  slope_stderr: number;
-  intercept_stderr: number;
+  /** null when the fit could not estimate an uncertainty: a two-point fit
+   * defines the line exactly but leaves no residual to spread. Distinct from
+   * 0, which would claim a perfect measurement. */
+  slope_stderr: number | null;
+  intercept_stderr: number | null;
   r_squared: number;
   weighted: boolean;
   x_log: boolean;

@@ -14,7 +14,12 @@ from typing import Any
 
 import numpy as np
 
-from app.analysis import InsufficientDataError, MissingColumnError, register
+from app.analysis import (
+    DegenerateInputError,
+    InsufficientDataError,
+    MissingColumnError,
+    register,
+)
 from app.schemas import DataSeries
 
 
@@ -24,6 +29,19 @@ def _require_column(data: DataSeries, name: str) -> list[float]:
     if values is None:
         raise MissingColumnError(name)
     return values
+
+
+def _require_finite(name: str, values: np.ndarray) -> None:
+    """Reject NaN/inf in a column.
+
+    numpy does not raise on these: they flow into the least-squares matrices
+    and come back either as a bare LinAlgError ("SVD did not converge"),
+    which is not an AnalysisError and so escapes the envelope as a 500, or --
+    for y -- as a result full of NaN that only fails later, when the response
+    cannot be serialised to JSON (KAN-57).
+    """
+    if not np.isfinite(values).all():
+        raise DegenerateInputError(f"column '{name}' must contain only finite numbers")
 
 
 @register("linear_regression")
@@ -40,6 +58,25 @@ def linear_regression(data: DataSeries, params: dict[str, Any]) -> dict[str, Any
 
     y_error_col = data.columns.get("y_error")
     y_error = np.array(y_error_col, dtype=float) if y_error_col is not None else None
+
+    # Validated before the log filter below, which compares with `> 0` and so
+    # would silently drop a NaN as if it were a non-positive point rather than
+    # report it.
+    _require_finite("x", x)
+    _require_finite("y", y)
+    if y_error is not None:
+        _require_finite("y_error", y_error)
+        # A measurement's standard deviation cannot be zero or negative. Zero
+        # becomes an infinite weight and takes the fit down with it; a
+        # negative one passed silently, because the sign cancels in the
+        # least-squares solution -- so a flipped sign or a mis-picked column
+        # produced a plausible-looking answer from meaningless input
+        # (KAN-60).
+        if not (y_error > 0).all():
+            raise DegenerateInputError(
+                "column 'y_error' must be strictly positive; "
+                "an uncertainty of zero or less is not a measurement error"
+            )
 
     x_log = bool(params.get("x_log", False))
     y_log = bool(params.get("y_log", False))
@@ -60,9 +97,16 @@ def linear_regression(data: DataSeries, params: dict[str, Any]) -> dict[str, Any
             y_error = y_error[keep]
 
     if len(x) < 2:
-        raise InsufficientDataError(
-            "at least 2 data points with positive values are required for a log-scale fit"
-        )
+        # This guard is at function-body level, so it catches a short input
+        # whether or not a log scale was asked for. Naming log unconditionally
+        # sent callers looking for a log setting they never touched, and
+        # "with positive values" is not a constraint a linear fit has at all
+        # (KAN-59).
+        if x_log or y_log:
+            raise InsufficientDataError(
+                "at least 2 data points with positive values are required for a log-scale fit"
+            )
+        raise InsufficientDataError("at least 2 data points are required")
 
     weights = None
     if y_error is not None:
@@ -78,8 +122,28 @@ def linear_regression(data: DataSeries, params: dict[str, Any]) -> dict[str, Any
     x_fit = np.log10(x) if x_log else x
     y_fit = np.log10(y) if y_log else y
 
-    (slope, intercept), cov = np.polyfit(x_fit, y_fit, deg=1, w=weights, cov=True)
-    slope_stderr, intercept_stderr = np.sqrt(np.diag(cov))
+    # Every x the same means there is no line to fit -- the least-squares
+    # matrix is singular, and numpy says so with a bare LinAlgError
+    # ("Singular matrix") that escapes the envelope as a 500 (KAN-57).
+    if len(np.unique(x_fit)) < 2:
+        raise DegenerateInputError(
+            "column 'x' must contain at least two distinct values; "
+            "a line cannot be fitted through a single x"
+        )
+
+    # np.polyfit needs more points than the polynomial order to scale the
+    # covariance matrix, so exactly two of them cannot produce standard
+    # errors -- with cov=True it raises a bare ValueError instead (KAN-57).
+    # The line itself is perfectly well defined by two points though, and
+    # refusing to draw it would be less useful than saying the uncertainty is
+    # unknown, so the fit is returned with null standard errors.
+    can_estimate_error = len(x_fit) > 2
+    if can_estimate_error:
+        (slope, intercept), cov = np.polyfit(x_fit, y_fit, deg=1, w=weights, cov=True)
+        slope_stderr, intercept_stderr = (float(v) for v in np.sqrt(np.diag(cov)))
+    else:
+        slope, intercept = np.polyfit(x_fit, y_fit, deg=1, w=weights)
+        slope_stderr = intercept_stderr = None
 
     predicted = slope * x_fit + intercept
     residuals = y_fit - predicted
@@ -108,8 +172,8 @@ def linear_regression(data: DataSeries, params: dict[str, Any]) -> dict[str, Any
     return {
         "slope": float(slope),
         "intercept": float(intercept),
-        "slope_stderr": float(slope_stderr),
-        "intercept_stderr": float(intercept_stderr),
+        "slope_stderr": slope_stderr,
+        "intercept_stderr": intercept_stderr,
         "r_squared": r_squared,
         "predicted_y": predicted.tolist(),
         "residuals": residuals.tolist(),
