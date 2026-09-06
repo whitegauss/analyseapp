@@ -183,11 +183,11 @@ func TestHTTPClientAnalyzeFailures(t *testing.T) {
 		}
 	})
 
-	t.Run("a truncated response body discards the status code as well", func(t *testing.T) {
-		// Pinned rather than endorsed: the status is known before the body is
-		// read, but a read failure drops it and returns 0 -- so this 200 reaches
-		// the caller as a 502, and the logs blame an unreachable worker.
-		// Distinguishing the two is KAN-63.
+	t.Run("a truncated response body is reported as a read failure", func(t *testing.T) {
+		// The caller turns this into the same 502 as an unreachable worker,
+		// so the error itself is the only place the difference survives --
+		// and the worker logged the 200 below, which is what made the two
+		// sides' logs disagree (KAN-63).
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Length", "100")
 			w.WriteHeader(http.StatusOK)
@@ -197,7 +197,35 @@ func TestHTTPClientAnalyzeFailures(t *testing.T) {
 
 		c := &HTTPClient{baseURL: srv.URL, http: srv.Client()}
 		status, respBody, err := c.Analyze(context.Background(), "trace-1", []byte(`{}`))
+
+		// The status stays 0: callers read any error as a failure and would
+		// misread a real status returned beside one.
 		assertNoResponse(t, status, respBody, err)
+		if !errors.Is(err, ErrReadResponse) {
+			t.Errorf("err = %v, want it to wrap ErrReadResponse", err)
+		}
+		// The status the worker did send is what lines this up against the
+		// worker's own log line for the same request.
+		if !strings.Contains(err.Error(), "200") {
+			t.Errorf("err = %v, want it to carry the status the worker answered", err)
+		}
+	})
+
+	t.Run("a worker that cannot be reached is not a read failure", func(t *testing.T) {
+		// The whole point of the sentinel is telling these two apart; if an
+		// unreachable worker matched it too, the log would be no better off.
+		closed, _ := newWorkerStub(t, http.StatusOK, `{}`)
+		closed.Close()
+
+		c := &HTTPClient{baseURL: closed.URL, http: &http.Client{}}
+		_, _, err := c.Analyze(context.Background(), "trace-1", []byte(`{}`))
+
+		if err == nil {
+			t.Fatal("err = nil, want a dial error")
+		}
+		if errors.Is(err, ErrReadResponse) {
+			t.Errorf("err = %v, want a dial failure not to look like a read failure", err)
+		}
 	})
 }
 

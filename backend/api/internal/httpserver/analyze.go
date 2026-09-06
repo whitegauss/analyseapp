@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/rs/zerolog/log"
+
 	"analyseapp/api/internal/cache"
 	"analyseapp/api/internal/experiments"
 	"analyseapp/api/internal/logging"
@@ -84,6 +86,16 @@ func handleAnalyzeExperiment(repo experiments.Store, workerClient worker.Client,
 
 		status, respBody, err := workerClient.Analyze(r.Context(), logging.TraceID(r.Context()), workerBody)
 		if err != nil {
+			// A refused connection, a timeout and a response that stopped
+			// halfway all reach the client as this one 502, which is fine --
+			// the request failed either way. What is not fine is that the
+			// reason was dropped here entirely, leaving the logs and the
+			// 502 in http_requests_total saying "the worker is down" even
+			// when it had answered (KAN-63).
+			log.Warn().
+				Err(err).
+				Str("trace_id", logging.TraceID(r.Context())).
+				Msg("analysis worker request failed")
 			response.WriteError(w, http.StatusBadGateway, "worker_unreachable", "failed to reach analysis worker")
 			return
 		}
