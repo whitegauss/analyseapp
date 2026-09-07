@@ -1,38 +1,94 @@
-export type PropagationOperation =
-  "add" | "subtract" | "multiply" | "divide" | "power";
+import {
+  evaluateWithGradient,
+  FormulaError,
+  parseFormula,
+  type ParsedFormula,
+} from "./formula";
 
-export type PropagationResult = { value: number; uncertainty: number };
+export type MeasuredValue = {
+  value: number;
+  // 1σ uncertainty. Zero means the quantity is treated as exact (a defined
+  // constant such as g = 9.80665, or a counted number), which drops it out of
+  // the propagated total without removing it from the formula.
+  uncertainty: number;
+};
 
-// Standard first-order (linear) error propagation for two independent,
-// uncorrelated measurements x±sx and y±sy: σz = sqrt(sum of (∂z/∂xi * σxi)^2).
-// For "power" (z = x^n), y doubles as the exponent n and is treated as an
-// exact constant with no uncertainty of its own (sy is ignored).
-export function propagateError(
-  operation: PropagationOperation,
-  x: number,
-  sx: number,
-  y: number,
-  sy: number,
+export type PropagationTerm = {
+  name: string;
+  // ∂z/∂x at the given values -- the sensitivity of the result to this
+  // variable, independent of how well it was measured.
+  partial: number;
+  // |∂z/∂x|·σx: how much of the final uncertainty this variable is
+  // responsible for, in the units of the result.
+  contribution: number;
+  // contribution² / σz², i.e. this variable's share of the variance. The
+  // shares sum to 1, which is what makes "measure this one better" a
+  // decision the numbers can support.
+  share: number;
+};
+
+export type PropagationResult = {
+  value: number;
+  uncertainty: number;
+  // Ordered as the variables appear in the formula, not by size, so the rows
+  // line up with the input fields.
+  terms: PropagationTerm[];
+};
+
+// First-order (linear) propagation for a formula of independent, uncorrelated
+// measurements: σz² = Σ (∂z/∂xi · σxi)².
+//
+// "First-order" is the assumption to keep in mind: the formula is treated as
+// linear over the range of each σ, which is the standard lab convention and
+// is accurate as long as the uncertainties are small compared to the values.
+// Correlated inputs would need the covariance terms this deliberately omits.
+export function propagate(
+  formula: ParsedFormula,
+  variables: Record<string, MeasuredValue>,
 ): PropagationResult {
-  switch (operation) {
-    case "add":
-      return { value: x + y, uncertainty: Math.sqrt(sx ** 2 + sy ** 2) };
-    case "subtract":
-      return { value: x - y, uncertainty: Math.sqrt(sx ** 2 + sy ** 2) };
-    case "multiply":
-      return {
-        value: x * y,
-        uncertainty: Math.sqrt((y * sx) ** 2 + (x * sy) ** 2),
-      };
-    case "divide":
-      return {
-        value: x / y,
-        uncertainty: Math.sqrt((sx / y) ** 2 + ((x * sy) / y ** 2) ** 2),
-      };
-    case "power":
-      return {
-        value: Math.pow(x, y),
-        uncertainty: Math.abs(y * Math.pow(x, y - 1)) * sx,
-      };
+  const values: Record<string, number> = {};
+  for (const name of formula.variables) {
+    const measured = variables[name];
+    if (!measured) {
+      throw new FormulaError(`${name} の値がありません`, 0);
+    }
+    values[name] = measured.value;
   }
+
+  const { value, gradient } = evaluateWithGradient(formula.ast, values);
+
+  const contributions = formula.variables.map((name) => {
+    const partial = gradient[name] ?? 0;
+    return {
+      name,
+      partial,
+      contribution: Math.abs(partial * variables[name].uncertainty),
+    };
+  });
+
+  const variance = contributions.reduce(
+    (total, term) => total + term.contribution ** 2,
+    0,
+  );
+  const uncertainty = Math.sqrt(variance);
+
+  return {
+    value,
+    uncertainty,
+    terms: contributions.map((term) => ({
+      ...term,
+      // A zero total means every input was exact; the shares are then 0
+      // rather than NaN, which is what an exact result should report.
+      share: variance > 0 ? term.contribution ** 2 / variance : 0,
+    })),
+  };
+}
+
+// Convenience wrapper for callers holding a formula as text. Throws
+// FormulaError on a syntax problem, the same as parseFormula.
+export function propagateFormula(
+  source: string,
+  variables: Record<string, MeasuredValue>,
+): PropagationResult {
+  return propagate(parseFormula(source), variables);
 }
