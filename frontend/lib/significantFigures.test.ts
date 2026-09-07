@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { formatUncertainty, roundToUncertainty } from "./significantFigures";
+import {
+  formatToPrecision,
+  formatUncertainty,
+  roundToUncertainty,
+} from "./significantFigures";
 
 describe("roundToUncertainty", () => {
   it("rounds to the uncertainty's leading (1 significant figure) decimal place", () => {
@@ -77,5 +81,31 @@ describe("formatUncertainty", () => {
     expect(formatUncertainty(-1)).toBe("0.0");
     expect(formatUncertainty(NaN)).toBe("0.0");
     expect(formatUncertainty(Infinity)).toBe("0.0");
+  });
+});
+
+describe("formatToPrecision", () => {
+  it("keeps the digits of a round integer instead of stripping its zeros", () => {
+    // "1000".toPrecision(4) has no decimal point, so trimming trailing zeros
+    // would report a partial derivative of 1000 as 1.
+    expect(formatToPrecision(1000)).toBe("1000");
+    expect(formatToPrecision(1200)).toBe("1200");
+    expect(formatToPrecision(2000)).toBe("2000");
+  });
+
+  it("trims trailing zeros that follow a decimal point", () => {
+    expect(formatToPrecision(1.5)).toBe("1.5");
+    expect(formatToPrecision(0.25)).toBe("0.25");
+  });
+
+  it("switches to exponential notation outside the readable range", () => {
+    expect(formatToPrecision(1234567)).toBe("1.23e+6");
+    expect(formatToPrecision(0.0000123)).toBe("1.23e-5");
+  });
+
+  it("reports zero and non-finite values without NaN leaking into the UI", () => {
+    expect(formatToPrecision(0)).toBe("0");
+    expect(formatToPrecision(Infinity)).toBe("—");
+    expect(formatToPrecision(NaN)).toBe("—");
   });
 });

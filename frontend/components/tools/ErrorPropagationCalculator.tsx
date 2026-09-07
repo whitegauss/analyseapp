@@ -14,6 +14,7 @@ import {
   type ParsedFormula,
 } from "@/lib/formula";
 import {
+  formatToPrecision,
   formatUncertainty,
   roundToUncertainty,
 } from "@/lib/significantFigures";
@@ -63,9 +64,9 @@ export default function ErrorPropagationCalculator() {
   const result = useMemo((): PropagationResult | null => {
     if (!parsed.formula || variables.length === 0) return null;
 
-    const measured: Record<string, MeasuredValue> = {};
+    const measured: Record<string, MeasuredValue> = Object.create(null);
     for (const name of variables) {
-      const entry = entries[name];
+      const entry = entryOf(entries, name);
       if (!entry || entry.value.trim() === "") return null;
       const value = Number(entry.value);
       // A blank uncertainty means "exact", which is how constants written
@@ -78,7 +79,16 @@ export default function ErrorPropagationCalculator() {
 
     try {
       const propagated = propagate(parsed.formula, measured);
-      if (!Number.isFinite(propagated.value)) return null;
+      // The uncertainty is checked as well as the value: sqrt(x) at x = 0 has
+      // a finite value and an infinite derivative, and formatUncertainty
+      // renders a non-finite uncertainty as "0.0" -- an exact-looking answer
+      // to a formula that is anything but.
+      if (
+        !Number.isFinite(propagated.value) ||
+        !Number.isFinite(propagated.uncertainty)
+      ) {
+        return null;
+      }
       return propagated;
     } catch {
       return null;
@@ -87,17 +97,22 @@ export default function ErrorPropagationCalculator() {
 
   const allFilled =
     variables.length > 0 &&
-    variables.every((name) => (entries[name]?.value ?? "").trim() !== "");
+    variables.every(
+      (name) => (entryOf(entries, name)?.value ?? "").trim() !== "",
+    );
 
   const setEntry = (name: string, patch: Partial<Entry>) =>
-    setEntries((current) => ({
-      ...current,
-      [name]: {
-        value: current[name]?.value ?? "",
-        uncertainty: current[name]?.uncertainty ?? "",
+    setEntries((current) => {
+      const next: Record<string, Entry> = Object.create(null);
+      Object.assign(next, current);
+      const existing = entryOf(current, name);
+      next[name] = {
+        value: existing?.value ?? "",
+        uncertainty: existing?.uncertainty ?? "",
         ...patch,
-      },
-    }));
+      };
+      return next;
+    });
 
   const { rounded, decimals } = roundToUncertainty(
     result?.value ?? 0,
@@ -191,7 +206,7 @@ export default function ErrorPropagationCalculator() {
                     <input
                       type="number"
                       step="any"
-                      value={entries[name]?.value ?? ""}
+                      value={entryOf(entries, name)?.value ?? ""}
                       onChange={(e) =>
                         setEntry(name, { value: e.target.value })
                       }
@@ -202,7 +217,7 @@ export default function ErrorPropagationCalculator() {
                     <input
                       type="number"
                       step="any"
-                      value={entries[name]?.uncertainty ?? ""}
+                      value={entryOf(entries, name)?.uncertainty ?? ""}
                       onChange={(e) =>
                         setEntry(name, { uncertainty: e.target.value })
                       }
@@ -211,7 +226,7 @@ export default function ErrorPropagationCalculator() {
                     />
                   </td>
                   <td className="py-1 pr-3 tabular-nums text-zinc-600 dark:text-zinc-400">
-                    {term ? formatPartial(term.partial) : "—"}
+                    {term ? formatToPrecision(term.partial) : "—"}
                   </td>
                   <td className="py-1">
                     {term ? (
@@ -270,11 +285,12 @@ export default function ErrorPropagationCalculator() {
   );
 }
 
-// The partials span whatever scale the formula does, so a fixed number of
-// decimals would show 0.00 for one formula and a wall of digits for another.
-function formatPartial(partial: number): string {
-  if (partial === 0) return "0";
-  const magnitude = Math.abs(partial);
-  if (magnitude >= 1e5 || magnitude < 1e-3) return partial.toExponential(2);
-  return partial.toPrecision(4).replace(/\.?0+$/, "");
+// Variable names come from the formula the user typed, so a plain property
+// read would resolve `constructor` or `toString` to something inherited --
+// and `entry.value.trim()` on a function is a crash, not a wrong number.
+function entryOf(
+  entries: Record<string, Entry>,
+  name: string,
+): Entry | undefined {
+  return Object.hasOwn(entries, name) ? entries[name] : undefined;
 }

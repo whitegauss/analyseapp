@@ -46,9 +46,14 @@ export function propagate(
   formula: ParsedFormula,
   variables: Record<string, MeasuredValue>,
 ): PropagationResult {
-  const values: Record<string, number> = {};
+  // Object.create(null) / hasOwn throughout: variable names come from the
+  // formula the user typed, and `constructor` or `__proto__` must behave like
+  // any other name rather than resolving to something inherited.
+  const values: Record<string, number> = Object.create(null);
   for (const name of formula.variables) {
-    const measured = variables[name];
+    const measured = Object.hasOwn(variables, name)
+      ? variables[name]
+      : undefined;
     if (!measured) {
       throw new FormulaError(`${name} の値がありません`, 0);
     }
@@ -58,7 +63,7 @@ export function propagate(
   const { value, gradient } = evaluateWithGradient(formula.ast, values);
 
   const contributions = formula.variables.map((name) => {
-    const partial = gradient[name] ?? 0;
+    const partial = Object.hasOwn(gradient, name) ? gradient[name] : 0;
     return {
       name,
       partial,

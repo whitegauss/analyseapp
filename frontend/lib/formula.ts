@@ -365,14 +365,14 @@ class Parser {
         return this.parseCall(token);
       }
 
-      if (token.text in CONSTANTS) {
+      if (Object.hasOwn(CONSTANTS, token.text)) {
         return {
           type: "constant",
           name: token.text,
           value: CONSTANTS[token.text],
         };
       }
-      if (token.text in FUNCTIONS) {
+      if (Object.hasOwn(FUNCTIONS, token.text)) {
         throw new FormulaError(
           `${token.text} は関数です。${token.text}(...) のように括弧が要ります`,
           token.position,
@@ -391,7 +391,9 @@ class Parser {
   }
 
   private parseCall(name: Token): Node {
-    const spec = FUNCTIONS[name.text];
+    const spec = Object.hasOwn(FUNCTIONS, name.text)
+      ? FUNCTIONS[name.text]
+      : undefined;
     if (!spec && name.text === "log") {
       throw new FormulaError(AMBIGUOUS_LOG, name.position);
     }
@@ -455,18 +457,22 @@ export function evaluateWithGradient(
 function visit(node: Node, values: Record<string, number>): Evaluation {
   switch (node.type) {
     case "number":
-      return { value: node.value, gradient: {} };
+      return { value: node.value, gradient: emptyGradient() };
 
     case "constant":
-      return { value: node.value, gradient: {} };
+      return { value: node.value, gradient: emptyGradient() };
 
     case "variable": {
-      const value = values[node.name];
+      const value = Object.hasOwn(values, node.name)
+        ? values[node.name]
+        : undefined;
       if (value === undefined) {
         throw new FormulaError(`${node.name} の値がありません`, 0);
       }
       // ∂x/∂x = 1; every other variable's partial stays 0 by omission.
-      return { value, gradient: { [node.name]: 1 } };
+      const gradient = emptyGradient();
+      gradient[node.name] = 1;
+      return { value, gradient };
     }
 
     case "negate": {
@@ -484,7 +490,7 @@ function visit(node: Node, values: Record<string, number>): Evaluation {
       const spec = FUNCTIONS[node.name];
       const args = node.args.map((arg) => visit(arg, values));
       const argValues = args.map((arg) => arg.value);
-      let gradient: Record<string, number> = {};
+      let gradient = emptyGradient();
       args.forEach((arg, i) => {
         gradient = add(
           gradient,
@@ -552,11 +558,19 @@ function visitBinary(
   }
 }
 
+// A gradient is keyed by variable names the user typed, so it is built
+// without a prototype: `constructor` must not resolve to something inherited,
+// and `__proto__ = 1` on a plain object silently sets the prototype instead
+// of storing the partial, which would drop that variable from the result.
+function emptyGradient(): Record<string, number> {
+  return Object.create(null) as Record<string, number>;
+}
+
 function scale(
   gradient: Record<string, number>,
   factor: number,
 ): Record<string, number> {
-  const scaled: Record<string, number> = {};
+  const scaled = emptyGradient();
   for (const [name, partial] of Object.entries(gradient)) {
     scaled[name] = partial * factor;
   }
@@ -567,7 +581,8 @@ function add(
   a: Record<string, number>,
   b: Record<string, number>,
 ): Record<string, number> {
-  const sum: Record<string, number> = { ...a };
+  const sum = emptyGradient();
+  Object.assign(sum, a);
   for (const [name, partial] of Object.entries(b)) {
     sum[name] = (sum[name] ?? 0) + partial;
   }

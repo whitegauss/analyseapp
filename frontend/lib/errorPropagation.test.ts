@@ -121,6 +121,29 @@ describe("propagateFormula", () => {
     expect(terms.every((term) => term.share === 0)).toBe(true);
   });
 
+  it("propagates variables named after Object.prototype members", () => {
+    const { value, uncertainty, terms } = propagateFormula(
+      "__proto__ + constructor",
+      {
+        ["__proto__"]: { value: 2, uncertainty: 0.3 },
+        constructor: { value: 3, uncertainty: 0.4 },
+      },
+    );
+    expect(value).toBe(5);
+    expect(uncertainty).toBeCloseTo(0.5, 10);
+    expect(terms.map((t) => t.name)).toEqual(["__proto__", "constructor"]);
+  });
+
+  it("reports a non-finite uncertainty rather than hiding it as zero", () => {
+    // sqrt(x) at x = 0: the value is finite but ∂z/∂x is not, so callers have
+    // to be able to see that the linear approximation broke down here.
+    const { value, uncertainty } = propagateFormula("sqrt(x)", {
+      x: { value: 0, uncertainty: 0.1 },
+    });
+    expect(value).toBe(0);
+    expect(Number.isFinite(uncertainty)).toBe(false);
+  });
+
   it("refuses a formula whose variables were not all given values", () => {
     expect(() =>
       propagateFormula("x+y", { x: { value: 1, uncertainty: 0 } }),

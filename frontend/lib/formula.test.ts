@@ -131,6 +131,27 @@ describe("evaluateWithGradient", () => {
     }
   });
 
+  it("treats names that live on Object.prototype as ordinary variables", () => {
+    // `"constructor" in CONSTANTS` is true through the prototype chain, which
+    // would turn a variable named constructor into a constant holding a
+    // function; toString would be rejected as "a function needing parens".
+    for (const name of ["constructor", "toString", "valueOf"]) {
+      expect(parseFormula(`2*${name}`).variables).toEqual([name]);
+      expect(evaluate(`2*${name}`, { [name]: 3 }).value).toBe(6);
+    }
+  });
+
+  it("keeps the partial of a variable named __proto__", () => {
+    // Writing __proto__ on a plain object sets the prototype instead of
+    // storing the key, so this variable's derivative would silently vanish.
+    // The computed key matters: `{ __proto__: 5 }` in a literal sets the
+    // prototype instead of creating the property, which is the same trap the
+    // gradient bookkeeping has to avoid.
+    const { value, gradient } = evaluate("__proto__*2", { ["__proto__"]: 5 });
+    expect(value).toBe(10);
+    expect(gradient["__proto__"]).toBe(2);
+  });
+
   it("reports a missing value instead of computing with undefined", () => {
     expect(() => evaluate("x+y", { x: 1 })).toThrow(FormulaError);
   });
