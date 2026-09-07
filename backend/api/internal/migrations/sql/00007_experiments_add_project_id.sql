@@ -9,10 +9,29 @@
 alter table experiments
     add column if not exists project_id uuid references projects (id) on delete cascade;
 
+-- Stage 1 put no constraint on project titles, so a user can already own
+-- two projects called 未分類 -- and the unique index below would fail on
+-- them, taking the whole migration (goose runs it in one transaction) with
+-- it, leaving project_id nullable and unfilled. The extras are renamed
+-- rather than deleted or merged: they hold nothing to merge (experiments
+-- have no project_id until this migration runs) but they are still projects
+-- the user made by hand, with their own descriptions.
+update projects p
+set title = p.title || ' (' || d.position || ')',
+    updated_at = now()
+from (
+    select id, row_number() over (partition by user_id order by created_at, id) as position
+    from projects
+    where title = '未分類'
+) d
+where p.id = d.id and d.position > 1;
+
 -- One "未分類" (uncategorised) project per user, created only for users who
 -- actually have experiments that predate projects. The partial unique index
--- below keeps this to exactly one per user from here on, so the backfill
--- and the API agree on which project that is.
+-- keeps this to exactly one per user from here on, so the backfill and the
+-- API agree on which project that is. Not CONCURRENTLY: goose wraps each
+-- migration in a transaction, which that cannot run inside, and this table
+-- is small enough that the brief write lock does not matter.
 create unique index if not exists projects_user_default_idx
     on projects (user_id, title)
     where title = '未分類';

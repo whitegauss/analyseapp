@@ -130,9 +130,9 @@ func (r *Repository) EnsureDefault(ctx context.Context, userID uuid.UUID) (Proje
 }
 
 // getDefault reads the user's default project. Ordered and limited rather
-// than assuming uniqueness: the partial unique index only covers rows
-// created after the 00007 migration ran, and a database that predates it
-// could hold two.
+// than relying on the partial unique index alone: the tie-break matches the
+// one 00007 used when it renamed pre-existing duplicates (oldest wins), so
+// a database migrated from either state resolves to the same project.
 func (r *Repository) getDefault(ctx context.Context, userID uuid.UUID) (Project, error) {
 	return r.queryRowProject(ctx,
 		`select id, user_id, title, description, created_at, updated_at
