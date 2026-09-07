@@ -136,7 +136,8 @@ curl -X POST "$SUPABASE_URL/auth/v1/signup" \
 
 実験データ（`/experiments/*`）とは独立した、ログイン不要のスタンドアロンなミニツールページです。ヘッダー左上のハンバーガーメニュー（`components/ToolsMenu.tsx`）の「計算ツール」から`/tools`に遷移します。タブ切り替え（`components/tools/ToolsCalculator.tsx`）で4つのツールを提供:
 
-- **誤差伝播**（`ErrorPropagationCalculator.tsx`）: x±σx, y±σy（またはxとべき乗の指数n）を入力し、加算・減算・乗算・除算・べき乗（z = xⁿ）の結果z±σzを計算します。x, yは独立・無相関という前提での線形近似（1次のテイラー展開）による標準的な誤差伝播式を使用（`lib/errorPropagation.ts`）
+- **誤差伝播**（`ErrorPropagationCalculator.tsx`）: 数式を自由に入力すると（例: `2*pi*sqrt(L/g)`）、式に出てくる変数が入力欄として並び、各変数の値と1σ不確かさから z±σz を計算します。各変数は独立・無相関という前提での線形近似（1次のテイラー展開）による誤差伝播 σz = √Σ(∂z/∂xi・σxi)² を使用。偏微分は前進モードの自動微分で厳密に求めます（数値微分と違い刻み幅の選び方に依存しません）。変数ごとの ∂z/∂x と、分散に占める寄与率（どの測定を改善すると効くか）も表示します。式のパーサーと自動微分は`lib/formula.ts`、伝播の計算は`lib/errorPropagation.ts`
+  - 使える関数: sqrt / exp / ln / log10 / sin / cos / tan / asin / acos / atan / atan2 / sinh / cosh / tanh / abs、定数`pi`・`e`。三角関数の引数はラジアン（度は`sin(theta*pi/180)`と書く）。`log`は底が曖昧なため意図的に受け付けず、`ln`か`log10`を促すエラーを返します。σを空欄にした変数は厳密な定数として扱われます
 - **有効数字の丸め**（`SignificantFigureRounder.tsx`）: 値と1σ不確かさを入力すると、グラフの回帰直線表示と同じ規約（不確かさの先頭有効数字に合わせて丸め、小数点以下は最大4桁まで）で表示を計算します。丸めロジック自体は`lib/significantFigures.ts`（`roundToUncertainty`/`formatUncertainty`）としてグラフ側と共有しています
 - **単位変換**（`UnitConverter.tsx`）: 長さ・質量・時間・角度・温度の5カテゴリ（`lib/unitConversion.ts`）。温度のみ単純な係数ではなくオフセット付きの変換式（℃/℉/K）を使用
 - **統計量**（`MeasurementStatsCalculator.tsx`）: 測定値をスプレッドシートなどからコピー＆ペースト（複数列可）すると、列ごとにn・平均±不確かさ（平均の標準誤差）・標準偏差を計算します。保存済み実験とは無関係に、その場で貼り付けた数値だけを対象にする独立ツールです（`lib/statistics.ts`のロジックを再利用。以前は`/experiments/{id}`にインライン表示していましたが、実験に紐付かない汎用ツールとして`/tools`に統合しました）

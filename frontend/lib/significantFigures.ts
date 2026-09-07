@@ -38,3 +38,19 @@ export function formatUncertainty(uncertainty: number | null): string {
   const { rounded, decimals } = roundToUncertainty(uncertainty, uncertainty);
   return rounded.toFixed(decimals);
 }
+
+// Formats a number whose scale is not known in advance -- a partial derivative
+// can be 1e-7 for one formula and 1e6 for the next, so a fixed number of
+// decimals would show "0.00" in one case and a wall of digits in the other.
+// Trailing zeros are only trimmed after a decimal point: "1000".toPrecision(4)
+// has no point, and stripping its zeros would turn 1000 into 1.
+export function formatToPrecision(value: number, digits = 4): string {
+  if (!Number.isFinite(value)) return "—";
+  if (value === 0) return "0";
+
+  const magnitude = Math.abs(value);
+  if (magnitude >= 1e5 || magnitude < 1e-3) return value.toExponential(2);
+
+  const text = value.toPrecision(digits);
+  return text.includes(".") ? text.replace(/\.?0+$/, "") : text;
+}
