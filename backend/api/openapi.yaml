@@ -289,6 +289,10 @@ paths:
     post:
       tags: [experiments]
       summary: Create an experiment
+      description: >-
+        プロジェクトを指定しない作成パス。実験は呼び出したユーザーの既定プロジェクト
+        「未分類」に入る（無ければ作成される）。プロジェクトを明示して作成する
+        POST /api/v1/projects/{id}/experiments は今後追加予定。
       security:
         - bearerAuth: []
       requestBody:
@@ -783,6 +787,11 @@ components:
         user_id:
           type: string
           format: uuid
+        project_id:
+          type: string
+          format: uuid
+          description: >-
+            所属プロジェクト。実験は必ずいずれかのプロジェクトに属する（PDR.md §5）。
         title:
           type: string
           nullable: true

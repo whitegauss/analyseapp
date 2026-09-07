@@ -19,6 +19,15 @@ import (
 // to callers so ownership is never leaked.
 var ErrNotFound = errors.New("project not found")
 
+// DefaultTitle is the project every user gets implicitly: experiments
+// created without naming a project land here, and the 00007 migration moved
+// every pre-projects experiment into one of these. A partial unique index
+// (projects_user_default_idx) keeps it to one per user, so the migration and
+// EnsureDefault always mean the same project.
+const DefaultTitle = "未分類"
+
+const defaultDescription = "プロジェクトを選ばずに作成した実験の置き場所です。"
+
 type Project struct {
 	ID          uuid.UUID `json:"id"`
 	UserID      uuid.UUID `json:"user_id"`
@@ -35,6 +44,7 @@ type Project struct {
 type Store interface {
 	EnsureProfile(ctx context.Context, userID uuid.UUID) error
 	Create(ctx context.Context, userID uuid.UUID, title, description string) (Project, error)
+	EnsureDefault(ctx context.Context, userID uuid.UUID) (Project, error)
 	GetByID(ctx context.Context, id, userID uuid.UUID) (Project, error)
 	ListByUser(ctx context.Context, userID uuid.UUID) ([]Project, error)
 	Update(ctx context.Context, id, userID uuid.UUID, title, description string) (Project, error)
@@ -90,6 +100,48 @@ func (r *Repository) Create(ctx context.Context, userID uuid.UUID, title, descri
 	)
 }
 
+// EnsureDefault returns the user's DefaultTitle project, creating it on
+// first use. This is what keeps POST /api/v1/experiments (which names no
+// project) working now that experiments.project_id is NOT NULL.
+//
+// Two round trips instead of one upsert, because an upsert that returns the
+// existing row needs ON CONFLICT inference to name the partial index's
+// predicate literally, which is a good deal harder to read than this. The
+// insert still carries ON CONFLICT DO NOTHING so that two concurrent first
+// requests cannot create two default projects: the loser gets no row back
+// and reads the winner's instead.
+func (r *Repository) EnsureDefault(ctx context.Context, userID uuid.UUID) (Project, error) {
+	p, err := r.getDefault(ctx, userID)
+	if err == nil || !errors.Is(err, ErrNotFound) {
+		return p, err
+	}
+
+	p, err = r.queryRowProject(ctx,
+		`insert into projects (user_id, title, description)
+		 values ($1, $2, $3)
+		 on conflict do nothing
+		 returning id, user_id, title, description, created_at, updated_at`,
+		userID, DefaultTitle, defaultDescription,
+	)
+	if errors.Is(err, ErrNotFound) {
+		return r.getDefault(ctx, userID)
+	}
+	return p, err
+}
+
+// getDefault reads the user's default project. Ordered and limited rather
+// than assuming uniqueness: the partial unique index only covers rows
+// created after the 00007 migration ran, and a database that predates it
+// could hold two.
+func (r *Repository) getDefault(ctx context.Context, userID uuid.UUID) (Project, error) {
+	return r.queryRowProject(ctx,
+		`select id, user_id, title, description, created_at, updated_at
+		 from projects where user_id = $1 and title = $2
+		 order by created_at, id limit 1`,
+		userID, DefaultTitle,
+	)
+}
+
 func (r *Repository) GetByID(ctx context.Context, id, userID uuid.UUID) (Project, error) {
 	return r.queryRowProject(ctx,
 		`select id, user_id, title, description, created_at, updated_at
@@ -135,10 +187,10 @@ func (r *Repository) Update(ctx context.Context, id, userID uuid.UUID, title, de
 	)
 }
 
-// Delete removes a project owned by userID. Once experiments.project_id
-// exists (a follow-up migration), experiments belonging to this project will
-// cascade-delete via that column's FK -- no application-level cleanup
-// needed. Until then, projects don't have any experiments attached.
+// Delete removes a project owned by userID. Experiments belonging to it are
+// removed too, via experiments.project_id's "on delete cascade" FK (see
+// 00007_experiments_add_project_id.sql) -- no application-level cleanup
+// needed, but the UI has to say so before asking for confirmation.
 func (r *Repository) Delete(ctx context.Context, id, userID uuid.UUID) error {
 	tag, err := r.pool.Exec(ctx,
 		`delete from projects where id = $1 and user_id = $2`,

@@ -5,6 +5,7 @@ import (
 
 	"analyseapp/api/internal/cache"
 	"analyseapp/api/internal/experiments"
+	"analyseapp/api/internal/projects"
 	"analyseapp/api/internal/response"
 )
 
@@ -22,7 +23,17 @@ type updateRawDataRequest struct {
 	RawData map[string]any `json:"raw_data"`
 }
 
-func handleCreateExperiment(repo experiments.Store) http.HandlerFunc {
+// handleCreateExperiment serves the flat POST /api/v1/experiments, which
+// names no project. Every experiment needs one now that project_id is NOT
+// NULL, so the request lands in the user's default project (projects
+// .DefaultTitle), created on first use.
+//
+// The endpoint stays for the same reason the default project exists: the UI
+// has no project picker yet (KAN-27), and the nested
+// POST /api/v1/projects/{id}/experiments that will carry an explicit choice
+// is KAN-25. Keeping this path working is what lets Stage 2 ship without
+// the frontend changing in the same breath.
+func handleCreateExperiment(repo experiments.Store, projectRepo projects.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID, ok := requireUserID(w, r)
 		if !ok {
@@ -46,7 +57,13 @@ func handleCreateExperiment(repo experiments.Store) http.HandlerFunc {
 			return
 		}
 
-		e, err := repo.Create(r.Context(), userID, req.Title, req.RawData, req.Config)
+		project, err := projectRepo.EnsureDefault(r.Context(), userID)
+		if err != nil {
+			response.WriteError(w, http.StatusInternalServerError, "internal_error", "failed to resolve the default project")
+			return
+		}
+
+		e, err := repo.Create(r.Context(), userID, project.ID, req.Title, req.RawData, req.Config)
 		if err != nil {
 			response.WriteError(w, http.StatusInternalServerError, "internal_error", "failed to create experiment")
 			return

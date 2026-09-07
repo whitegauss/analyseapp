@@ -3,6 +3,7 @@ package httpserver
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +16,7 @@ import (
 	"analyseapp/api/internal/auth"
 	"analyseapp/api/internal/cache"
 	"analyseapp/api/internal/experiments"
+	"analyseapp/api/internal/projects"
 	"analyseapp/api/internal/response"
 )
 
@@ -25,7 +27,7 @@ var testUserID = uuid.MustParse("11111111-1111-1111-1111-111111111111")
 // database. Unset function fields fail the test if called.
 type fakeStore struct {
 	t               *testing.T
-	createFn        func(ctx context.Context, userID uuid.UUID, title *string, rawData, config map[string]any) (experiments.Experiment, error)
+	createFn        func(ctx context.Context, userID, projectID uuid.UUID, title *string, rawData, config map[string]any) (experiments.Experiment, error)
 	getByIDFn       func(ctx context.Context, id, userID uuid.UUID) (experiments.Experiment, error)
 	listByUserFn    func(ctx context.Context, userID uuid.UUID) ([]experiments.Experiment, error)
 	updateConfigFn  func(ctx context.Context, id, userID uuid.UUID, config map[string]any) (experiments.Experiment, error)
@@ -37,11 +39,11 @@ func (f *fakeStore) EnsureProfile(ctx context.Context, userID uuid.UUID) error {
 	return nil
 }
 
-func (f *fakeStore) Create(ctx context.Context, userID uuid.UUID, title *string, rawData, config map[string]any) (experiments.Experiment, error) {
+func (f *fakeStore) Create(ctx context.Context, userID, projectID uuid.UUID, title *string, rawData, config map[string]any) (experiments.Experiment, error) {
 	if f.createFn == nil {
 		f.t.Fatal("unexpected call to Create")
 	}
-	return f.createFn(ctx, userID, title, rawData, config)
+	return f.createFn(ctx, userID, projectID, title, rawData, config)
 }
 
 func (f *fakeStore) GetByID(ctx context.Context, id, userID uuid.UUID) (experiments.Experiment, error) {
@@ -114,7 +116,7 @@ func TestHandleCreateExperiment(t *testing.T) {
 		req := newTestRequest("POST", "", `{"raw_data":{}}`, false)
 		rec := httptest.NewRecorder()
 
-		handleCreateExperiment(store)(rec, req)
+		handleCreateExperiment(store, defaultProjectStore(t, projects.Project{ID: uuid.New()}))(rec, req)
 
 		if rec.Code != http.StatusUnauthorized {
 			t.Errorf("status = %d, want 401", rec.Code)
@@ -126,7 +128,7 @@ func TestHandleCreateExperiment(t *testing.T) {
 		req := newTestRequest("POST", "", `not json`, true)
 		rec := httptest.NewRecorder()
 
-		handleCreateExperiment(store)(rec, req)
+		handleCreateExperiment(store, defaultProjectStore(t, projects.Project{ID: uuid.New()}))(rec, req)
 
 		if rec.Code != http.StatusBadRequest {
 			t.Errorf("status = %d, want 400", rec.Code)
@@ -141,7 +143,7 @@ func TestHandleCreateExperiment(t *testing.T) {
 		req := newTestRequest("POST", "", `{"title":"x"}`, true)
 		rec := httptest.NewRecorder()
 
-		handleCreateExperiment(store)(rec, req)
+		handleCreateExperiment(store, defaultProjectStore(t, projects.Project{ID: uuid.New()}))(rec, req)
 
 		if rec.Code != http.StatusBadRequest {
 			t.Errorf("status = %d, want 400", rec.Code)
@@ -156,16 +158,16 @@ func TestHandleCreateExperiment(t *testing.T) {
 		gotTitleSet := false
 		store := &fakeStore{
 			t: t,
-			createFn: func(ctx context.Context, userID uuid.UUID, title *string, rawData, config map[string]any) (experiments.Experiment, error) {
+			createFn: func(ctx context.Context, userID, projectID uuid.UUID, title *string, rawData, config map[string]any) (experiments.Experiment, error) {
 				gotTitle = title
 				gotTitleSet = true
-				return experiments.Experiment{ID: uuid.New(), UserID: userID, Title: title, RawData: rawData, Config: config}, nil
+				return experiments.Experiment{ID: uuid.New(), UserID: userID, ProjectID: projectID, Title: title, RawData: rawData, Config: config}, nil
 			},
 		}
 		req := newTestRequest("POST", "", `{"title":"","raw_data":{"columns":{}}}`, true)
 		rec := httptest.NewRecorder()
 
-		handleCreateExperiment(store)(rec, req)
+		handleCreateExperiment(store, defaultProjectStore(t, projects.Project{ID: uuid.New()}))(rec, req)
 
 		if rec.Code != http.StatusCreated {
 			t.Fatalf("status = %d, want 201 (body=%s)", rec.Code, rec.Body.String())
@@ -178,18 +180,66 @@ func TestHandleCreateExperiment(t *testing.T) {
 		}
 	})
 
+	t.Run("stores the experiment in the user's default project", func(t *testing.T) {
+		// The flat path names no project, so the handler has to supply one:
+		// without it the insert violates experiments.project_id's NOT NULL.
+		defaultProject := projects.Project{ID: uuid.New(), Title: projects.DefaultTitle}
+		var gotProjectID uuid.UUID
+		store := &fakeStore{
+			t: t,
+			createFn: func(ctx context.Context, userID, projectID uuid.UUID, title *string, rawData, config map[string]any) (experiments.Experiment, error) {
+				gotProjectID = projectID
+				return experiments.Experiment{ID: uuid.New(), UserID: userID, ProjectID: projectID, RawData: rawData}, nil
+			},
+		}
+		req := newTestRequest("POST", "", `{"raw_data":{"columns":{"x":[1]}}}`, true)
+		rec := httptest.NewRecorder()
+
+		handleCreateExperiment(store, defaultProjectStore(t, defaultProject))(rec, req)
+
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("status = %d, want 201 (body=%s)", rec.Code, rec.Body.String())
+		}
+		if gotProjectID != defaultProject.ID {
+			t.Errorf("project id passed to store = %v, want the default project %v", gotProjectID, defaultProject.ID)
+		}
+		if !strings.Contains(rec.Body.String(), defaultProject.ID.String()) {
+			t.Errorf("body = %s, want it to carry project_id %v", rec.Body.String(), defaultProject.ID)
+		}
+	})
+
+	t.Run("default project cannot be resolved", func(t *testing.T) {
+		// Nothing can be stored without a project, so this is a 500 rather
+		// than an experiment quietly created somewhere else.
+		store := &fakeStore{t: t}
+		projectStore := &fakeProjectStore{
+			t: t,
+			ensureDefaultFn: func(ctx context.Context, userID uuid.UUID) (projects.Project, error) {
+				return projects.Project{}, errors.New("db is down")
+			},
+		}
+		req := newTestRequest("POST", "", `{"raw_data":{"columns":{"x":[1]}}}`, true)
+		rec := httptest.NewRecorder()
+
+		handleCreateExperiment(store, projectStore)(rec, req)
+
+		if rec.Code != http.StatusInternalServerError {
+			t.Errorf("status = %d, want 500", rec.Code)
+		}
+	})
+
 	t.Run("success", func(t *testing.T) {
 		title := "my experiment"
 		store := &fakeStore{
 			t: t,
-			createFn: func(ctx context.Context, userID uuid.UUID, title *string, rawData, config map[string]any) (experiments.Experiment, error) {
-				return experiments.Experiment{ID: uuid.New(), UserID: userID, Title: title, RawData: rawData, Config: config}, nil
+			createFn: func(ctx context.Context, userID, projectID uuid.UUID, title *string, rawData, config map[string]any) (experiments.Experiment, error) {
+				return experiments.Experiment{ID: uuid.New(), UserID: userID, ProjectID: projectID, Title: title, RawData: rawData, Config: config}, nil
 			},
 		}
 		req := newTestRequest("POST", "", `{"title":"`+title+`","raw_data":{"columns":{"x":[1]}}}`, true)
 		rec := httptest.NewRecorder()
 
-		handleCreateExperiment(store)(rec, req)
+		handleCreateExperiment(store, defaultProjectStore(t, projects.Project{ID: uuid.New()}))(rec, req)
 
 		if rec.Code != http.StatusCreated {
 			t.Errorf("status = %d, want 201 (body=%s)", rec.Code, rec.Body.String())
