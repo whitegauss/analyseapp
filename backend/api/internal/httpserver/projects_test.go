@@ -15,12 +15,13 @@ import (
 // tests, so handler validation/status-code logic is testable without a
 // database. Unset function fields fail the test if called.
 type fakeProjectStore struct {
-	t            *testing.T
-	createFn     func(ctx context.Context, userID uuid.UUID, title, description string) (projects.Project, error)
-	getByIDFn    func(ctx context.Context, id, userID uuid.UUID) (projects.Project, error)
-	listByUserFn func(ctx context.Context, userID uuid.UUID) ([]projects.Project, error)
-	updateFn     func(ctx context.Context, id, userID uuid.UUID, title, description string) (projects.Project, error)
-	deleteFn     func(ctx context.Context, id, userID uuid.UUID) error
+	t               *testing.T
+	createFn        func(ctx context.Context, userID uuid.UUID, title, description string) (projects.Project, error)
+	ensureDefaultFn func(ctx context.Context, userID uuid.UUID) (projects.Project, error)
+	getByIDFn       func(ctx context.Context, id, userID uuid.UUID) (projects.Project, error)
+	listByUserFn    func(ctx context.Context, userID uuid.UUID) ([]projects.Project, error)
+	updateFn        func(ctx context.Context, id, userID uuid.UUID, title, description string) (projects.Project, error)
+	deleteFn        func(ctx context.Context, id, userID uuid.UUID) error
 }
 
 func (f *fakeProjectStore) EnsureProfile(ctx context.Context, userID uuid.UUID) error {
@@ -32,6 +33,26 @@ func (f *fakeProjectStore) Create(ctx context.Context, userID uuid.UUID, title, 
 		f.t.Fatal("unexpected call to Create")
 	}
 	return f.createFn(ctx, userID, title, description)
+}
+
+func (f *fakeProjectStore) EnsureDefault(ctx context.Context, userID uuid.UUID) (projects.Project, error) {
+	if f.ensureDefaultFn == nil {
+		f.t.Fatal("unexpected call to EnsureDefault")
+	}
+	return f.ensureDefaultFn(ctx, userID)
+}
+
+// defaultProjectStore is the projects.Store the flat create path needs: it
+// answers EnsureDefault with one fixed project and refuses every other call.
+func defaultProjectStore(t *testing.T, project projects.Project) *fakeProjectStore {
+	t.Helper()
+	return &fakeProjectStore{
+		t: t,
+		ensureDefaultFn: func(ctx context.Context, userID uuid.UUID) (projects.Project, error) {
+			project.UserID = userID
+			return project, nil
+		},
+	}
 }
 
 func (f *fakeProjectStore) GetByID(ctx context.Context, id, userID uuid.UUID) (projects.Project, error) {

@@ -18,8 +18,13 @@ import (
 var ErrNotFound = errors.New("experiment not found")
 
 type Experiment struct {
-	ID        uuid.UUID      `json:"id"`
-	UserID    uuid.UUID      `json:"user_id"`
+	ID     uuid.UUID `json:"id"`
+	UserID uuid.UUID `json:"user_id"`
+	// ProjectID is NOT NULL in the database (PDR.md section 5): every
+	// experiment belongs to exactly one project. UserID stays alongside it
+	// even though it is reachable through the project, so authorization
+	// remains a single-table "where id = $1 and user_id = $2" check.
+	ProjectID uuid.UUID      `json:"project_id"`
 	Title     *string        `json:"title"`
 	RawData   map[string]any `json:"raw_data"`
 	Config    map[string]any `json:"config"`
@@ -33,7 +38,7 @@ type Experiment struct {
 // without a database.
 type Store interface {
 	EnsureProfile(ctx context.Context, userID uuid.UUID) error
-	Create(ctx context.Context, userID uuid.UUID, title *string, rawData, config map[string]any) (Experiment, error)
+	Create(ctx context.Context, userID, projectID uuid.UUID, title *string, rawData, config map[string]any) (Experiment, error)
 	GetByID(ctx context.Context, id, userID uuid.UUID) (Experiment, error)
 	ListByUser(ctx context.Context, userID uuid.UUID) ([]Experiment, error)
 	UpdateConfig(ctx context.Context, id, userID uuid.UUID, config map[string]any) (Experiment, error)
@@ -50,14 +55,14 @@ func NewRepository(pool *pgxpool.Pool) *Repository {
 }
 
 // queryRowExperiment runs a query expected to return exactly one experiments
-// row (in the column order id, user_id, title, raw_data, config, created_at,
-// updated_at) and scans it into an Experiment. A row-not-found result is
+// row (in the column order id, user_id, project_id, title, raw_data, config,
+// created_at, updated_at) and scans it into an Experiment. A row-not-found result is
 // normalized to ErrNotFound -- shared by every Repository method whose query
 // is scoped to a single experiment by id/user_id.
 func (r *Repository) queryRowExperiment(ctx context.Context, query string, args ...any) (Experiment, error) {
 	var e Experiment
 	err := r.pool.QueryRow(ctx, query, args...).
-		Scan(&e.ID, &e.UserID, &e.Title, &e.RawData, &e.Config, &e.CreatedAt, &e.UpdatedAt)
+		Scan(&e.ID, &e.UserID, &e.ProjectID, &e.Title, &e.RawData, &e.Config, &e.CreatedAt, &e.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Experiment{}, ErrNotFound
@@ -78,21 +83,28 @@ func (r *Repository) EnsureProfile(ctx context.Context, userID uuid.UUID) error 
 	return err
 }
 
-func (r *Repository) Create(ctx context.Context, userID uuid.UUID, title *string, rawData, config map[string]any) (Experiment, error) {
+// Create stores an experiment in projectID. The insert is guarded by the
+// project's ownership rather than trusting the caller: an id belonging to
+// someone else (or to nothing at all) selects no row, so the insert writes
+// nothing and this reports ErrNotFound. Callers turn that into the same 404
+// an unknown experiment id gets, which is what keeps another user's project
+// ids from being probed through this endpoint.
+func (r *Repository) Create(ctx context.Context, userID, projectID uuid.UUID, title *string, rawData, config map[string]any) (Experiment, error) {
 	if config == nil {
 		config = map[string]any{}
 	}
 	return r.queryRowExperiment(ctx,
-		`insert into experiments (user_id, title, raw_data, config)
-		 values ($1, $2, $3, $4)
-		 returning id, user_id, title, raw_data, config, created_at, updated_at`,
-		userID, title, rawData, config,
+		`insert into experiments (user_id, project_id, title, raw_data, config)
+		 select $1, $2, $3, $4, $5
+		 where exists (select 1 from projects where id = $2 and user_id = $1)
+		 returning id, user_id, project_id, title, raw_data, config, created_at, updated_at`,
+		userID, projectID, title, rawData, config,
 	)
 }
 
 func (r *Repository) GetByID(ctx context.Context, id, userID uuid.UUID) (Experiment, error) {
 	return r.queryRowExperiment(ctx,
-		`select id, user_id, title, raw_data, config, created_at, updated_at
+		`select id, user_id, project_id, title, raw_data, config, created_at, updated_at
 		 from experiments where id = $1 and user_id = $2`,
 		id, userID,
 	)
@@ -103,7 +115,7 @@ func (r *Repository) GetByID(ctx context.Context, id, userID uuid.UUID) (Experim
 // serialize it directly as a JSON array.
 func (r *Repository) ListByUser(ctx context.Context, userID uuid.UUID) ([]Experiment, error) {
 	rows, err := r.pool.Query(ctx,
-		`select id, user_id, title, raw_data, config, created_at, updated_at
+		`select id, user_id, project_id, title, raw_data, config, created_at, updated_at
 		 from experiments where user_id = $1 order by created_at desc`,
 		userID,
 	)
@@ -115,7 +127,7 @@ func (r *Repository) ListByUser(ctx context.Context, userID uuid.UUID) ([]Experi
 	list := []Experiment{}
 	for rows.Next() {
 		var e Experiment
-		if err := rows.Scan(&e.ID, &e.UserID, &e.Title, &e.RawData, &e.Config, &e.CreatedAt, &e.UpdatedAt); err != nil {
+		if err := rows.Scan(&e.ID, &e.UserID, &e.ProjectID, &e.Title, &e.RawData, &e.Config, &e.CreatedAt, &e.UpdatedAt); err != nil {
 			return nil, err
 		}
 		list = append(list, e)
@@ -147,7 +159,7 @@ func (r *Repository) UpdateConfig(ctx context.Context, id, userID uuid.UUID, con
 	return r.queryRowExperiment(ctx,
 		`update experiments set config = $1, updated_at = now()
 		 where id = $2 and user_id = $3
-		 returning id, user_id, title, raw_data, config, created_at, updated_at`,
+		 returning id, user_id, project_id, title, raw_data, config, created_at, updated_at`,
 		config, id, userID,
 	)
 }
@@ -156,7 +168,7 @@ func (r *Repository) UpdateRawData(ctx context.Context, id, userID uuid.UUID, ra
 	return r.queryRowExperiment(ctx,
 		`update experiments set raw_data = $1, updated_at = now()
 		 where id = $2 and user_id = $3
-		 returning id, user_id, title, raw_data, config, created_at, updated_at`,
+		 returning id, user_id, project_id, title, raw_data, config, created_at, updated_at`,
 		rawData, id, userID,
 	)
 }

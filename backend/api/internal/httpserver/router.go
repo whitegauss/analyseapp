@@ -70,7 +70,8 @@ func NewRouter(dbPool *pgxpool.Pool, jwks keyfunc.Keyfunc, workerClient worker.C
 
 			if dbPool != nil {
 				repo := experiments.NewRepository(dbPool)
-				r.Post("/experiments", handleCreateExperiment(repo))
+				projectRepo := projects.NewRepository(dbPool)
+				r.Post("/experiments", handleCreateExperiment(repo, projectRepo))
 				r.Get("/experiments", handleListExperiments(repo))
 				r.Get("/experiments/{id}", handleGetExperiment(repo))
 				r.Delete("/experiments/{id}", handleDeleteExperiment(repo))
@@ -78,7 +79,6 @@ func NewRouter(dbPool *pgxpool.Pool, jwks keyfunc.Keyfunc, workerClient worker.C
 				r.Patch("/experiments/{id}/raw_data", handleUpdateExperimentRawData(repo, resultCache))
 				r.Post("/experiments/{id}/analyze", handleAnalyzeExperiment(repo, workerClient, resultCache))
 
-				projectRepo := projects.NewRepository(dbPool)
 				r.Post("/projects", handleCreateProject(projectRepo))
 				r.Get("/projects", handleListProjects(projectRepo))
 				r.Get("/projects/{id}", handleGetProject(projectRepo))
