@@ -26,7 +26,13 @@ var ErrNotFound = errors.New("project not found")
 // EnsureDefault always mean the same project.
 const DefaultTitle = "未分類"
 
-const defaultDescription = "プロジェクトを選ばずに作成した実験の置き場所です。"
+// defaultDescription is duplicated as a literal in
+// 00007_experiments_add_project_id.sql, which creates the same project
+// for users who had experiments before projects existed. A migration
+// cannot read a Go constant, so the two are kept in step by hand --
+// change one and change the other, or the same default project reads
+// differently depending on which side created it.
+const defaultDescription = "プロジェクトを指定せずに作成した実験と、プロジェクト機能の導入前からある実験の置き場所です。"
 
 type Project struct {
 	ID          uuid.UUID `json:"id"`

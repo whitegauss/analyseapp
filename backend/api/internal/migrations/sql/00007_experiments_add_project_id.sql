@@ -36,8 +36,12 @@ create unique index if not exists projects_user_default_idx
     on projects (user_id, title)
     where title = '未分類';
 
+-- The description is the same string projects.defaultDescription inserts
+-- for users who reach the default project the other way (a first
+-- experiment created after this migration): one project, one wording,
+-- whichever side got there first. Keep the two in step.
 insert into projects (user_id, title, description)
-select distinct e.user_id, '未分類', 'プロジェクト機能の導入前からある実験の置き場所です。'
+select distinct e.user_id, '未分類', 'プロジェクトを指定せずに作成した実験と、プロジェクト機能の導入前からある実験の置き場所です。'
 from experiments e
 where e.project_id is null
 on conflict do nothing;
