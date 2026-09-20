@@ -9,6 +9,11 @@ type Props = {
   onCancel: () => void;
   formAction: (formData: FormData) => void;
   pending: boolean;
+  // What the submit button says. Defaults to 保存, which is right for the
+  // editors this started out serving; the project pickers set it to the
+  // verb they actually perform.
+  submitLabel?: string;
+  pendingLabel?: string;
   submitDisabled?: boolean;
   error?: string;
   children: ReactNode;
@@ -25,6 +30,8 @@ export default function InlineEditCard({
   onCancel,
   formAction,
   pending,
+  submitLabel = "保存",
+  pendingLabel = "保存中...",
   submitDisabled,
   error,
   children,
@@ -58,7 +65,7 @@ export default function InlineEditCard({
           disabled={pending || submitDisabled}
           className="rounded-md bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900"
         >
-          {pending ? "保存中..." : "保存"}
+          {pending ? pendingLabel : submitLabel}
         </button>
         <button
           type="button"

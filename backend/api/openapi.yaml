@@ -716,6 +716,58 @@ paths:
                 error: { code: worker_unreachable, message: "failed to reach analysis worker" }
                 meta: {}
 
+  /api/v1/experiments/{id}/project:
+    patch:
+      tags: [experiments]
+      summary: Move an experiment to another project
+      description: >-
+        実験の所属プロジェクトだけを付け替える。**実験 ID は変わらない**ので、
+        既存のリンク・ブックマーク・CSV エクスポート URL はそのまま使える
+        （複製して元を消す POST /api/v1/experiments/{id}/copy との違いはここ）。
+        移動元の実験・移動先のプロジェクトのいずれかが他人のもの / 存在しない
+        場合は 404。現在と同じプロジェクトを指定した場合はそのまま 200 を返す
+        （何も変わらない）。キャッシュキーは `analysis:{experiment_id}:*` で
+        プロジェクトを含まず `raw_data` も変わらないため、無効化は発生しない
+        （PDR.md §7）。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ExperimentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MoveExperimentRequest"
+            example:
+              project_id: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+      responses:
+        "200":
+          description: OK — the experiment, with its new project_id
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Experiment"
+        "400":
+          description: Malformed body, `project_id` missing, or either id is not a valid UUID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Envelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /api/v1/experiments/{id}/copy:
     post:
       tags: [experiments]
@@ -963,6 +1015,15 @@ components:
           $ref: "#/components/schemas/DataSeries"
         config:
           $ref: "#/components/schemas/ExperimentConfig"
+
+    MoveExperimentRequest:
+      type: object
+      required: [project_id]
+      properties:
+        project_id:
+          description: 移動先のプロジェクト。呼び出したユーザーが所有していなければ 404
+          type: string
+          format: uuid
 
     CopyExperimentRequest:
       type: object

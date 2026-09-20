@@ -43,6 +43,7 @@ type Store interface {
 	ListByUser(ctx context.Context, userID uuid.UUID) ([]Experiment, error)
 	ListByProject(ctx context.Context, projectID, userID uuid.UUID) ([]Experiment, error)
 	Copy(ctx context.Context, id, userID, targetProjectID uuid.UUID) (Experiment, error)
+	UpdateProject(ctx context.Context, id, userID, targetProjectID uuid.UUID) (Experiment, error)
 	UpdateConfig(ctx context.Context, id, userID uuid.UUID, config map[string]any) (Experiment, error)
 	UpdateRawData(ctx context.Context, id, userID uuid.UUID, rawData map[string]any) (Experiment, error)
 	Delete(ctx context.Context, id, userID uuid.UUID) error
@@ -189,6 +190,35 @@ func (r *Repository) Copy(ctx context.Context, id, userID, targetProjectID uuid.
 		 where e.id = $1 and e.user_id = $2
 		   and exists (select 1 from projects p where p.id = $3 and p.user_id = $2)
 		 returning id, user_id, project_id, title, raw_data, config, created_at, updated_at`,
+		id, userID, targetProjectID,
+	)
+}
+
+// UpdateProject moves an experiment to targetProjectID, keeping its id and
+// everything else. This is the counterpart to Copy: Copy duplicates and
+// leaves the source alone, while this re-parents the row in place, so
+// existing links to /experiments/{id} keep working and created_at still
+// says when the measurement was taken.
+//
+// Guarded the same way as Copy, in one statement: the where clause requires
+// the experiment to be userID's and the destination project to be as well,
+// so either one failing updates nothing and reports ErrNotFound.
+//
+// Moving an experiment to the project it is already in is allowed and
+// succeeds unchanged -- the row still matches, so it comes back as a plain
+// 200. There is nothing to protect against there, and making it an error
+// would only force callers to compare ids first.
+//
+// No cache invalidation (PDR.md section 7): analysis:{experiment_id}:* does
+// not include the project, and raw_data has not changed, so every cached
+// result for this experiment is still correct.
+func (r *Repository) UpdateProject(ctx context.Context, id, userID, targetProjectID uuid.UUID) (Experiment, error) {
+	return r.queryRowExperiment(ctx,
+		`update experiments e
+		 set project_id = $3, updated_at = now()
+		 where e.id = $1 and e.user_id = $2
+		   and exists (select 1 from projects p where p.id = $3 and p.user_id = $2)
+		 returning e.id, e.user_id, e.project_id, e.title, e.raw_data, e.config, e.created_at, e.updated_at`,
 		id, userID, targetProjectID,
 	)
 }

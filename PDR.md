@@ -149,7 +149,9 @@ Stage 2 の既存データ移行は、`project_id`を nullable で追加 → ユ
 
 フロントの実験作成はネストパス`POST /api/v1/projects/{id}/experiments`のみを使う。フラットな`POST /api/v1/experiments`は画面からは呼ばれなくなったが、外部 API（§8）向けの「プロジェクトを指定しない作成パス」として残す。既定プロジェクト「未分類」もその受け皿として残る。
 
-**実験を別プロジェクトへ「移動」する手段はまだ無い。** コピー（Stage 4）は複製なので代わりにならず（原子的でない2手になり、実験 ID も変わる）、`PATCH /api/v1/experiments/{id}`で`project_id`を付け替える API が別途要る（KAN-87）。
+**コピーと移動は別物として両方用意する**（KAN-87）。コピー（Stage 4）は複製で、新しい実験 ID を発番して独立したレコードを作る。移動`PATCH /api/v1/experiments/{id}/project`は所属の付け替えで、**実験 ID が変わらない**ためリンク・ブックマーク・CSV エクスポート URL が生き残り、`created_at`も測定時刻のまま残る。「コピーして元を削除」で移動を代用しないのはこのため（原子的でない2手になり、ID も日時も失われる）。
+
+移動のパスを`PATCH /api/v1/experiments/{id}`ではなくサブリソースの`/project`にしたのは、既存の`/config`・`/raw_data`と形を揃えるため。`project_id`しか見ない汎用 PATCH を1つ増やすより、更新対象ごとにパスを分ける既存の流儀に乗る。
 
 なお、このステージ分けは元々ローカルの作業ログ（`.gitignore`対象で共有されない）にだけ書かれており、リポジトリを clone しただけでは辿れなかった（KAN-35）。**Readme や他の共有ドキュメントから参照する情報は、作業ログではなくこの設計ドキュメント側に置く。**
 
@@ -219,6 +221,7 @@ GET    /api/v1/experiments/{id}
 DELETE /api/v1/experiments/{id}
 PATCH  /api/v1/experiments/{id}/config           グラフ設定（軸ラベル等）更新
 PATCH  /api/v1/experiments/{id}/raw_data         データ本体の更新
+PATCH  /api/v1/experiments/{id}/project          所属プロジェクトの付け替え（移動）{project_id}
 POST   /api/v1/experiments/{id}/copy             他プロジェクトへコピー {project_id}
 POST   /api/v1/experiments/{id}/analyze          解析実行 {type: "linear_regression", ...}
 POST   /api/v1/convert                           汎用変換（角度→数値など）

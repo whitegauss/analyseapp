@@ -39,6 +39,7 @@ func TestRegisterAPIRoutes(t *testing.T) {
 		"PATCH /experiments/{id}/raw_data",
 		"POST /experiments/{id}/analyze",
 		"POST /experiments/{id}/copy",
+		"PATCH /experiments/{id}/project",
 		"POST /projects",
 		"GET /projects",
 		"GET /projects/{id}",

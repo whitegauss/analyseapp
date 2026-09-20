@@ -121,6 +121,7 @@ curl -X POST "$SUPABASE_URL/auth/v1/signup" \
 - `DELETE /api/v1/experiments/{id}` — 自分が作成した実験を削除（他人のIDや存在しないIDは404）。関連する`analysis_results`行はDBの`ON DELETE CASCADE`で一緒に削除されます
 - `PATCH /api/v1/experiments/{id}/config` — `{config}` でグラフ設定を丸ごと置き換え
 - `PATCH /api/v1/experiments/{id}/raw_data` — `{raw_data}` でデータ本体を丸ごと置き換え。成功するとこの実験のRedisキャッシュ済み解析結果（`analysis:{experiment_id}:*`）を全て無効化します（ベストエフォート。Redisに到達できない場合も更新自体は成功します）
+- `PATCH /api/v1/experiments/{id}/project` — `{project_id}` を送信し、その実験の所属プロジェクトを付け替え（**実験IDは変わりません**。移動元の実験・移動先のプロジェクトのいずれかが他人のものや存在しないIDなら404。現在と同じプロジェクトを指定した場合も何も変わらず200）。キャッシュキーは`analysis:{experiment_id}:*`でプロジェクトを含まず`raw_data`も変わらないため、解析結果の無効化は発生しません
 - `POST /api/v1/experiments/{id}/copy` — `{project_id}` を送信し、その実験を指定プロジェクトに複製（新しい実験IDが発番され、以後コピー元とは完全に独立します。コピー元の実験・コピー先のプロジェクトのいずれかが他人のものや存在しないIDなら404）
 - `POST /api/v1/experiments/{id}/analyze` — `{type, params?}` を送信し、その実験の`raw_data`に対して解析を実行（例: `{"type":"linear_regression"}`）。`linear_regression`は`params`に`x_log`/`y_log`（真偽値、既定`false`）を渡すとlog10(x)・log10(y)に対して回帰します（片対数・両対数フィット。非正の値を持つデータ点はそのフィットから除外され、有効な点が2点未満なら`insufficient_data`エラー）。Go APIが実験を取得したうえでPython Workerの`POST /analyze`に中継し、Workerのレスポンス（`{data, error, meta}`）をそのまま返します。Workerに到達できない場合は`502`（`worker_unreachable`）。成功した結果はRedisに24hキャッシュされ（`analysis:{experiment_id}:{type}:{params_hash}`、PDR.md §7）、レスポンスヘッダー`X-Cache: HIT`/`MISS`でキャッシュ命中を確認できます。キャッシュ命中時はDB・Worker呼び出し自体が発生しません。Redisに到達できない場合もキャッシュなしで通常通り動作します
 
@@ -158,7 +159,7 @@ curl -X POST "$SUPABASE_URL/auth/v1/signup" \
 - 「削除」はその場でインライン確認に切り替わります（ブラウザのalert/confirmは使いません）。**プロジェクトを削除すると配下の実験も`ON DELETE CASCADE`で一緒に消える**ため、確認文にその件数を出します
 - 展開した中の「+ 実験を追加」から`/projects/{id}`へ。このページは配下の実験一覧と実験追加フォームで、保存は`POST /api/v1/projects/{id}/experiments`（ネストしたパス）を使います
 - `/experiments/{id}`の「他のプロジェクトへコピー」からコピー先を選んで複製できます（`POST /api/v1/experiments/{id}/copy`）。コピー元はそのまま残り、コピーは新しい実験IDを持つ独立したレコードになります。コピー後はコピー先の`/experiments/{id}`へ遷移します。現在のプロジェクトも選択肢に残していて（「（現在のプロジェクト）」と表示）、同じプロジェクト内での複製もできます
-- **実験を別プロジェクトへ「移動」する手段はまだありません**（移動APIが無いため。コピー＋元の削除は原子的でなく実験IDも変わります。KAN-87で対応予定）
+- `/experiments/{id}`の「他のプロジェクトへ移動」から所属を付け替えられます（`PATCH /api/v1/experiments/{id}/project`）。コピーと違って複製されず、**実験IDが変わらない**ので既存のリンクやCSVダウンロードURLはそのまま使えます。移動先の選択肢には現在のプロジェクトは出ません（移動しても何も変わらないため）。プロジェクトが1つしかない場合は移動先が無いのでボタン自体が出ません
 
 ## 実験データ入力・グラフ表示（フロントエンド）
 

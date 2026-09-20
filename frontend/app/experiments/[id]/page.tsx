@@ -5,7 +5,7 @@ import { fetchRegression } from "@/app/experiments/actions";
 import ExperimentChart from "@/components/ExperimentChart";
 import AxisLabelEditor from "@/components/AxisLabelEditor";
 import RawDataEditor from "@/components/RawDataEditor";
-import CopyExperimentButton from "@/components/CopyExperimentButton";
+import ExperimentProjectActions from "@/components/ExperimentProjectActions";
 import CenteredCard from "@/components/CenteredCard";
 import type { ProjectSummary } from "@/lib/dashboard";
 
@@ -41,10 +41,10 @@ export default async function ExperimentPage({
     redirect("/login");
   }
 
-  // The copy destinations. Read separately rather than folded into the
-  // fetch above, because a failure here must not take the page with it:
-  // being unable to offer a copy is worth losing the picker over, not the
-  // experiment.
+  // The copy/move destinations. Read separately rather than folded into
+  // the fetch above, because a failure here must not take the page with
+  // it: being unable to offer a copy is worth losing the pickers over, not
+  // the experiment.
   const projects = await callGoApi<ProjectSummary[]>("/api/v1/projects").catch(
     () => null,
   );
@@ -78,7 +78,7 @@ export default async function ExperimentPage({
           columns={experiment.raw_data.columns}
         />
         {projects && (
-          <CopyExperimentButton
+          <ExperimentProjectActions
             id={experiment.id}
             currentProjectId={experiment.project_id}
             projects={projects}

@@ -33,6 +33,7 @@ type fakeStore struct {
 	listByUserFn    func(ctx context.Context, userID uuid.UUID) ([]experiments.Experiment, error)
 	listByProjectFn func(ctx context.Context, projectID, userID uuid.UUID) ([]experiments.Experiment, error)
 	copyFn          func(ctx context.Context, id, userID, targetProjectID uuid.UUID) (experiments.Experiment, error)
+	updateProjectFn func(ctx context.Context, id, userID, targetProjectID uuid.UUID) (experiments.Experiment, error)
 	updateConfigFn  func(ctx context.Context, id, userID uuid.UUID, config map[string]any) (experiments.Experiment, error)
 	updateRawDataFn func(ctx context.Context, id, userID uuid.UUID, rawData map[string]any) (experiments.Experiment, error)
 	deleteFn        func(ctx context.Context, id, userID uuid.UUID) error
@@ -75,6 +76,13 @@ func (f *fakeStore) Copy(ctx context.Context, id, userID, targetProjectID uuid.U
 		f.t.Fatal("unexpected call to Copy")
 	}
 	return f.copyFn(ctx, id, userID, targetProjectID)
+}
+
+func (f *fakeStore) UpdateProject(ctx context.Context, id, userID, targetProjectID uuid.UUID) (experiments.Experiment, error) {
+	if f.updateProjectFn == nil {
+		f.t.Fatal("unexpected call to UpdateProject")
+	}
+	return f.updateProjectFn(ctx, id, userID, targetProjectID)
 }
 
 func (f *fakeStore) UpdateConfig(ctx context.Context, id, userID uuid.UUID, config map[string]any) (experiments.Experiment, error) {
@@ -800,6 +808,215 @@ func TestHandleCopyExperiment(t *testing.T) {
 		}
 		if !reflect.DeepEqual(got.Config, config) {
 			t.Errorf("config = %+v, want the source's %+v", got.Config, config)
+		}
+	})
+}
+
+func TestHandleMoveExperiment(t *testing.T) {
+	sourceID := uuid.New()
+	targetProjectID := uuid.New()
+	body := `{"project_id":"` + targetProjectID.String() + `"}`
+
+	ownedProjectStore := func(t *testing.T) *fakeProjectStore {
+		return &fakeProjectStore{
+			t: t,
+			getByIDFn: func(ctx context.Context, id, userID uuid.UUID) (projects.Project, error) {
+				return projects.Project{ID: id, UserID: userID}, nil
+			},
+		}
+	}
+
+	t.Run("unauthenticated", func(t *testing.T) {
+		store := &fakeStore{t: t}
+		req := newTestRequest("PATCH", sourceID.String(), body, false)
+		rec := httptest.NewRecorder()
+
+		handleMoveExperiment(store, &fakeProjectStore{t: t})(rec, req)
+
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("status = %d, want 401", rec.Code)
+		}
+	})
+
+	t.Run("invalid experiment id", func(t *testing.T) {
+		store := &fakeStore{t: t}
+		req := newTestRequest("PATCH", "not-a-uuid", body, true)
+		rec := httptest.NewRecorder()
+
+		handleMoveExperiment(store, &fakeProjectStore{t: t})(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("status = %d, want 400", rec.Code)
+		}
+		if b := decodeEnvelope(t, rec); b.Error == nil || b.Error.Code != "invalid_id" {
+			t.Errorf("error code = %+v, want invalid_id", b.Error)
+		}
+	})
+
+	t.Run("invalid JSON body", func(t *testing.T) {
+		store := &fakeStore{t: t}
+		req := newTestRequest("PATCH", sourceID.String(), `not json`, true)
+		rec := httptest.NewRecorder()
+
+		handleMoveExperiment(store, &fakeProjectStore{t: t})(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("status = %d, want 400", rec.Code)
+		}
+		if b := decodeEnvelope(t, rec); b.Error == nil || b.Error.Code != "invalid_body" {
+			t.Errorf("error code = %+v, want invalid_body", b.Error)
+		}
+	})
+
+	// A move with no destination has nothing to fall back on: there is no
+	// "default" project to land in, and doing nothing silently would look
+	// like the move succeeded.
+	t.Run("missing project_id", func(t *testing.T) {
+		store := &fakeStore{t: t}
+		req := newTestRequest("PATCH", sourceID.String(), `{}`, true)
+		rec := httptest.NewRecorder()
+
+		handleMoveExperiment(store, &fakeProjectStore{t: t})(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("status = %d, want 400", rec.Code)
+		}
+		if b := decodeEnvelope(t, rec); b.Error == nil || b.Error.Code != "invalid_project_id" {
+			t.Errorf("error code = %+v, want invalid_project_id", b.Error)
+		}
+	})
+
+	t.Run("malformed project_id", func(t *testing.T) {
+		store := &fakeStore{t: t}
+		req := newTestRequest("PATCH", sourceID.String(), `{"project_id":"not-a-uuid"}`, true)
+		rec := httptest.NewRecorder()
+
+		handleMoveExperiment(store, &fakeProjectStore{t: t})(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("status = %d, want 400", rec.Code)
+		}
+		if b := decodeEnvelope(t, rec); b.Error == nil || b.Error.Code != "invalid_project_id" {
+			t.Errorf("error code = %+v, want invalid_project_id", b.Error)
+		}
+	})
+
+	// Both fakes fail the test if UpdateProject is reached, so this also
+	// proves nothing is written when the destination is not the caller's.
+	t.Run("another user's destination project is a 404", func(t *testing.T) {
+		store := &fakeStore{t: t}
+		projectStore := &fakeProjectStore{
+			t: t,
+			getByIDFn: func(ctx context.Context, id, userID uuid.UUID) (projects.Project, error) {
+				return projects.Project{}, projects.ErrNotFound
+			},
+		}
+		req := newTestRequest("PATCH", sourceID.String(), body, true)
+		rec := httptest.NewRecorder()
+
+		handleMoveExperiment(store, projectStore)(rec, req)
+
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("status = %d, want 404 (body=%s)", rec.Code, rec.Body.String())
+		}
+		if b := decodeEnvelope(t, rec); b.Error == nil || b.Error.Message != "project not found" {
+			t.Errorf("error = %+v, want the message to name the project", b.Error)
+		}
+	})
+
+	t.Run("another user's experiment is a 404", func(t *testing.T) {
+		store := &fakeStore{
+			t: t,
+			updateProjectFn: func(ctx context.Context, id, userID, targetProjectID uuid.UUID) (experiments.Experiment, error) {
+				return experiments.Experiment{}, experiments.ErrNotFound
+			},
+		}
+		req := newTestRequest("PATCH", uuid.New().String(), body, true)
+		rec := httptest.NewRecorder()
+
+		handleMoveExperiment(store, ownedProjectStore(t))(rec, req)
+
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("status = %d, want 404 (body=%s)", rec.Code, rec.Body.String())
+		}
+		if b := decodeEnvelope(t, rec); b.Error == nil || b.Error.Message != "experiment not found" {
+			t.Errorf("error = %+v, want the message to name the experiment", b.Error)
+		}
+	})
+
+	t.Run("store failure", func(t *testing.T) {
+		store := &fakeStore{
+			t: t,
+			updateProjectFn: func(ctx context.Context, id, userID, targetProjectID uuid.UUID) (experiments.Experiment, error) {
+				return experiments.Experiment{}, errors.New("db is down")
+			},
+		}
+		req := newTestRequest("PATCH", sourceID.String(), body, true)
+		rec := httptest.NewRecorder()
+
+		handleMoveExperiment(store, ownedProjectStore(t))(rec, req)
+
+		if rec.Code != http.StatusInternalServerError {
+			t.Errorf("status = %d, want 500", rec.Code)
+		}
+	})
+
+	// The id must survive the move -- that is the whole difference from
+	// copy-then-delete, which would hand back a different experiment and
+	// break every existing link to this one.
+	t.Run("success keeps the id and changes the project", func(t *testing.T) {
+		var gotID, gotUserID, gotTarget uuid.UUID
+		store := &fakeStore{
+			t: t,
+			updateProjectFn: func(ctx context.Context, id, userID, targetProjectID uuid.UUID) (experiments.Experiment, error) {
+				gotID, gotUserID, gotTarget = id, userID, targetProjectID
+				return experiments.Experiment{
+					ID: id, UserID: userID, ProjectID: targetProjectID,
+				}, nil
+			},
+		}
+		req := newTestRequest("PATCH", sourceID.String(), body, true)
+		rec := httptest.NewRecorder()
+
+		handleMoveExperiment(store, ownedProjectStore(t))(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200 (body=%s)", rec.Code, rec.Body.String())
+		}
+		if gotID != sourceID {
+			t.Errorf("experiment id passed to store = %v, want %v", gotID, sourceID)
+		}
+		if gotUserID != testUserID {
+			t.Errorf("userID passed to store = %v, want %v", gotUserID, testUserID)
+		}
+		if gotTarget != targetProjectID {
+			t.Errorf("destination passed to store = %v, want %v", gotTarget, targetProjectID)
+		}
+		if !strings.Contains(rec.Body.String(), sourceID.String()) {
+			t.Errorf("body = %s, want it to still carry the original id %v", rec.Body.String(), sourceID)
+		}
+		if !strings.Contains(rec.Body.String(), targetProjectID.String()) {
+			t.Errorf("body = %s, want project_id %v", rec.Body.String(), targetProjectID)
+		}
+	})
+
+	// Moving into the project it is already in is a no-op, not an error:
+	// the row still matches, so the store returns it and this is a plain
+	// 200. Pinned so nobody "fixes" it into a 400.
+	t.Run("moving to the current project succeeds unchanged", func(t *testing.T) {
+		store := &fakeStore{
+			t: t,
+			updateProjectFn: func(ctx context.Context, id, userID, targetProjectID uuid.UUID) (experiments.Experiment, error) {
+				return experiments.Experiment{ID: id, UserID: userID, ProjectID: targetProjectID}, nil
+			},
+		}
+		req := newTestRequest("PATCH", sourceID.String(), body, true)
+		rec := httptest.NewRecorder()
+
+		handleMoveExperiment(store, ownedProjectStore(t))(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("status = %d, want 200 (body=%s)", rec.Code, rec.Body.String())
 		}
 	})
 }
