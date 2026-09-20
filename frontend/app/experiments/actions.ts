@@ -115,6 +115,29 @@ export async function updateRawData(
   );
 }
 
+export type CopyExperimentState = { error?: string };
+
+// Duplicates an experiment into another project (KAN-26). A copy, not a
+// move: the source stays where it is, and the copy gets its own id -- which
+// is why this lands on the copy rather than back on the source. There is no
+// move yet (KAN-87).
+export async function copyExperiment(
+  _prevState: CopyExperimentState,
+  formData: FormData,
+): Promise<CopyExperimentState> {
+  const id = String(formData.get("id") ?? "");
+  if (!id) return { error: "実験IDが不正です" };
+
+  const projectId = String(formData.get("projectId") ?? "");
+  if (!projectId) return { error: "コピー先のプロジェクトを選んでください" };
+
+  return submitAndRedirect<Experiment>(
+    `/api/v1/experiments/${id}/copy`,
+    { method: "POST", body: JSON.stringify({ project_id: projectId }) },
+    (copy) => `/experiments/${copy.id}`,
+  );
+}
+
 export async function deleteExperiment(formData: FormData): Promise<void> {
   const id = String(formData.get("id") ?? "");
   if (!id) return;

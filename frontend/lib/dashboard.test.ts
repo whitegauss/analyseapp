@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  attachProjectTitles,
   groupExperimentsByProject,
   type ExperimentSummary,
   type ProjectSummary,
@@ -83,5 +84,50 @@ describe("groupExperimentsByProject", () => {
 
   it("returns an empty list when there are no projects", () => {
     expect(groupExperimentsByProject([], [experiment("e1", "p1")])).toEqual([]);
+  });
+});
+
+describe("attachProjectTitles", () => {
+  it("labels each experiment with its project's title", () => {
+    const labelled = attachProjectTitles(
+      [project("p1", "落下運動"), project("p2", "振り子")],
+      [experiment("e1", "p1"), experiment("e2", "p2")],
+    );
+
+    expect(labelled.map((e) => [e.id, e.projectTitle])).toEqual([
+      ["e1", "落下運動"],
+      ["e2", "振り子"],
+    ]);
+  });
+
+  it("keeps an experiment whose project is missing, with a null title", () => {
+    // The opposite of groupExperimentsByProject: here the experiment is the
+    // row, so it stays visible even when the label cannot be resolved.
+    const labelled = attachProjectTitles(
+      [],
+      [experiment("e1", "deleted-project")],
+    );
+
+    expect(labelled).toEqual([
+      { ...experiment("e1", "deleted-project"), projectTitle: null },
+    ]);
+  });
+
+  it("does not resolve a title from an inherited property name", () => {
+    const labelled = attachProjectTitles(
+      [project("p1")],
+      [experiment("e1", "constructor")],
+    );
+
+    expect(labelled[0].projectTitle).toBeNull();
+  });
+
+  it("keeps the experiments in the order they arrived in", () => {
+    const labelled = attachProjectTitles(
+      [project("p1")],
+      [experiment("e2", "p1"), experiment("e1", "p1")],
+    );
+
+    expect(labelled.map((e) => e.id)).toEqual(["e2", "e1"]);
   });
 });

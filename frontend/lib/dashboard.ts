@@ -1,6 +1,7 @@
-// Shapes the dashboard's two API reads into the project -> experiments tree
-// the page renders. Kept here, away from the page, because it is the only
-// part with rules worth pinning in a test (frontend tests cover pure
+// Joins the projects read with the experiments read. Neither list carries
+// the other's data -- an experiment names only its project_id -- so every
+// page that shows both has to put them together, and the rules for doing
+// that live here rather than in the pages (frontend tests cover pure
 // functions only -- see Readme).
 
 export type ProjectSummary = {
@@ -54,5 +55,35 @@ export function groupExperimentsByProject(
   return projects.map((project) => ({
     ...project,
     experiments: byProjectId.get(project.id) ?? [],
+  }));
+}
+
+export type ExperimentWithProject = ExperimentSummary & {
+  // The project's title, or null when it is not in `projects`. Rendered as
+  // nothing rather than as "undefined" -- see attachProjectTitles for when
+  // that can happen.
+  projectTitle: string | null;
+};
+
+/**
+ * Labels each experiment with the name of the project it belongs to, for
+ * the cross-project list at /experiments where the project is otherwise
+ * invisible.
+ *
+ * Unlike groupExperimentsByProject, an experiment whose project is missing
+ * is kept -- it is the subject of the row, and dropping it would hide the
+ * user's own experiment over a label. It gets a null title instead.
+ */
+export function attachProjectTitles(
+  projects: ProjectSummary[],
+  experiments: ExperimentSummary[],
+): ExperimentWithProject[] {
+  const titleById = new Map(
+    projects.map((project) => [project.id, project.title]),
+  );
+
+  return experiments.map((experiment) => ({
+    ...experiment,
+    projectTitle: titleById.get(experiment.project_id) ?? null,
   }));
 }
