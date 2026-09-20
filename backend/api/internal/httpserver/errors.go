@@ -20,6 +20,14 @@ type storeResource struct {
 var (
 	experimentResource = storeResource{name: "experiment", notFound: experiments.ErrNotFound}
 	projectResource    = storeResource{name: "project", notFound: projects.ErrNotFound}
+
+	// nestedExperimentResource is the one deliberate mismatch: it pairs the
+	// experiments sentinel with the project's name. On POST
+	// /api/v1/projects/{id}/experiments the store guards its insert with
+	// the project's ownership and reports a project it cannot use as its
+	// own ErrNotFound -- but the id the client got wrong is the project's,
+	// so the 404 has to read the same as GET /api/v1/projects/{id}'s.
+	nestedExperimentResource = storeResource{name: projectResource.name, notFound: experiments.ErrNotFound}
 )
 
 // storeErrorResponse maps a store error to the HTTP response it deserves and
@@ -51,5 +59,13 @@ func writeExperimentError(w http.ResponseWriter, err error, failedTo string) {
 // projects.Store error.
 func writeProjectError(w http.ResponseWriter, err error, failedTo string) {
 	status, code, message := storeErrorResponse(err, projectResource, failedTo)
+	response.WriteError(w, status, code, message)
+}
+
+// writeNestedExperimentError writes the response storeErrorResponse picked
+// for an experiments.Store error raised under a /projects/{id}/ path, where
+// a missing row means a missing project (see nestedExperimentResource).
+func writeNestedExperimentError(w http.ResponseWriter, err error, failedTo string) {
+	status, code, message := storeErrorResponse(err, nestedExperimentResource, failedTo)
 	response.WriteError(w, status, code, message)
 }

@@ -285,14 +285,109 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /api/v1/projects/{id}/experiments:
+    post:
+      tags: [experiments]
+      summary: Create an experiment in a project
+      description: >-
+        プロジェクトを明示して実験を作成する。所属先は URL の `id` で決まり、
+        リクエストボディには含めない。他人のプロジェクト ID・存在しない ID は
+        区別せず 404（`project not found`）になるため、この経路でプロジェクト ID
+        の総当たり探索はできない。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateExperimentRequest"
+            example:
+              title: "落下運動の測定"
+              raw_data:
+                columns:
+                  x: [0, 1, 2, 3, 4]
+                  y: [1, 3, 5, 7, 9]
+                  y_error: [0.1, 0.1, 0.2, 0.1, 0.15]
+              config:
+                x_axis_label: "時刻 $t$ (s)"
+                y_axis_label: "速度 $v$ (m/s)"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Experiment"
+        "400":
+          description: Malformed body, `raw_data` missing, or `id` is not a valid UUID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Envelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    get:
+      tags: [experiments]
+      summary: List the experiments in a project
+      description: >-
+        Most recently created first. No pagination yet. プロジェクト横断の一覧は
+        GET /api/v1/experiments に残してある（コピー元の選択・複数実験の比較で使う）。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      responses:
+        "200":
+          description: OK (possibly an empty array)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/Experiment"
+        "400":
+          description: "`id` is not a valid UUID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Envelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /api/v1/experiments:
     post:
       tags: [experiments]
       summary: Create an experiment
       description: >-
         プロジェクトを指定しない作成パス。実験は呼び出したユーザーの既定プロジェクト
-        「未分類」に入る（無ければ作成される）。プロジェクトを明示して作成する
-        POST /api/v1/projects/{id}/experiments は今後追加予定。
+        「未分類」に入る（無ければ作成される）。プロジェクトを明示して作成する場合は
+        POST /api/v1/projects/{id}/experiments を使う。
       security:
         - bearerAuth: []
       requestBody:

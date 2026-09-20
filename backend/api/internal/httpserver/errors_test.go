@@ -44,6 +44,11 @@ func TestStoreErrorResponse(t *testing.T) {
 		// Wrapping does not make the sentinels interchangeable either.
 		{name: "a wrapped sentinel from the other resource is not recognized", err: fmt.Errorf("query: %w", projects.ErrNotFound),
 			res: experimentResource, failedTo: "get experiment", wantStatus: 500, wantCode: "internal_error", wantMessage: "failed to get experiment"},
+		// The nested create path pairs the experiments sentinel with the
+		// project's name on purpose, because the id the client got wrong
+		// there is the project's. Pinned so the pairing is not "fixed".
+		{name: "a nested create reports a missing project", err: experiments.ErrNotFound, res: nestedExperimentResource,
+			failedTo: "create experiment", wantStatus: 404, wantCode: "not_found", wantMessage: "project not found"},
 		// Callers only reach this function with a non-nil error; falling
 		// through to 500 is the safe direction, so pin it.
 		{name: "nil is not a not-found", err: nil, res: experimentResource,
@@ -92,5 +97,11 @@ func TestWriteStoreErrors(t *testing.T) {
 		rec := httptest.NewRecorder()
 		writeProjectError(rec, errors.New("boom"), "update project")
 		check(t, rec, 500, "internal_error", "failed to update project")
+	})
+
+	t.Run("writeNestedExperimentError", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		writeNestedExperimentError(rec, experiments.ErrNotFound, "create experiment")
+		check(t, rec, 404, "not_found", "project not found")
 	})
 }
