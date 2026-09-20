@@ -24,11 +24,13 @@ export default async function Header() {
       <div className="flex items-center gap-4 text-sm">
         {user ? (
           <>
+            {/* The logo already goes to the dashboard (= the project
+                list), so this is the cross-project view instead. */}
             <Link
               href="/experiments"
               className="text-zinc-600 underline dark:text-zinc-400"
             >
-              保存済みの実験一覧
+              すべての実験
             </Link>
             <span className="hidden text-zinc-500 sm:inline dark:text-zinc-400">
               {user.email}

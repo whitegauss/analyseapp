@@ -35,10 +35,18 @@ async function submitAndRedirect<T>(
 
 export type CreateExperimentState = { error?: string };
 
+// Creates an experiment in the project named by the form's projectId. The
+// nested path carries the destination, so nothing here has to resolve a
+// default -- the UI always knows which project the user is adding to
+// (KAN-27). The flat POST /api/v1/experiments still exists on the API for
+// project-less callers; the frontend no longer has one.
 export async function createExperiment(
   _prevState: CreateExperimentState,
   formData: FormData,
 ): Promise<CreateExperimentState> {
+  const projectId = String(formData.get("projectId") ?? "");
+  if (!projectId) return { error: "プロジェクトIDが不正です" };
+
   const titleInput = String(formData.get("title") ?? "").trim();
   const title = titleInput === "" ? null : titleInput;
 
@@ -51,7 +59,7 @@ export async function createExperiment(
   };
 
   return submitAndRedirect<Experiment>(
-    "/api/v1/experiments",
+    `/api/v1/projects/${projectId}/experiments`,
     {
       method: "POST",
       body: JSON.stringify({
