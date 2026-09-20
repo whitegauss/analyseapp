@@ -42,6 +42,7 @@ type Store interface {
 	GetByID(ctx context.Context, id, userID uuid.UUID) (Experiment, error)
 	ListByUser(ctx context.Context, userID uuid.UUID) ([]Experiment, error)
 	ListByProject(ctx context.Context, projectID, userID uuid.UUID) ([]Experiment, error)
+	Copy(ctx context.Context, id, userID, targetProjectID uuid.UUID) (Experiment, error)
 	UpdateConfig(ctx context.Context, id, userID uuid.UUID, config map[string]any) (Experiment, error)
 	UpdateRawData(ctx context.Context, id, userID uuid.UUID, rawData map[string]any) (Experiment, error)
 	Delete(ctx context.Context, id, userID uuid.UUID) error
@@ -160,6 +161,35 @@ func (r *Repository) ListByProject(ctx context.Context, projectID, userID uuid.U
 		`select id, user_id, project_id, title, raw_data, config, created_at, updated_at
 		 from experiments where project_id = $1 and user_id = $2 order by created_at desc`,
 		projectID, userID,
+	)
+}
+
+// Copy duplicates an experiment into targetProjectID as a new row with a
+// new id (PDR.md section 5: another project's data is taken in by copying,
+// not by reference, so the two are independent from then on). raw_data and
+// config are copied as they are; created_at and updated_at take their
+// defaults, because the copy is a new experiment rather than a record of
+// the original's age.
+//
+// One statement, so nothing can change underneath it: the select supplies
+// the row only if the source is userID's, and the exists clause only if the
+// destination project is too. Either one failing writes nothing and reports
+// ErrNotFound. Handlers check the destination separately beforehand to say
+// which of the two was wrong -- the guard here is what makes that check
+// safe to race with a delete.
+//
+// No cache invalidation (PDR.md section 7): the copy has a new experiment
+// id, so it shares no analysis:{experiment_id}:* key with its source, and
+// the source's own results are still correct.
+func (r *Repository) Copy(ctx context.Context, id, userID, targetProjectID uuid.UUID) (Experiment, error) {
+	return r.queryRowExperiment(ctx,
+		`insert into experiments (user_id, project_id, title, raw_data, config)
+		 select e.user_id, $3, e.title, e.raw_data, e.config
+		 from experiments e
+		 where e.id = $1 and e.user_id = $2
+		   and exists (select 1 from projects p where p.id = $3 and p.user_id = $2)
+		 returning id, user_id, project_id, title, raw_data, config, created_at, updated_at`,
+		id, userID, targetProjectID,
 	)
 }
 

@@ -121,6 +121,7 @@ curl -X POST "$SUPABASE_URL/auth/v1/signup" \
 - `DELETE /api/v1/experiments/{id}` — 自分が作成した実験を削除（他人のIDや存在しないIDは404）。関連する`analysis_results`行はDBの`ON DELETE CASCADE`で一緒に削除されます
 - `PATCH /api/v1/experiments/{id}/config` — `{config}` でグラフ設定を丸ごと置き換え
 - `PATCH /api/v1/experiments/{id}/raw_data` — `{raw_data}` でデータ本体を丸ごと置き換え。成功するとこの実験のRedisキャッシュ済み解析結果（`analysis:{experiment_id}:*`）を全て無効化します（ベストエフォート。Redisに到達できない場合も更新自体は成功します）
+- `POST /api/v1/experiments/{id}/copy` — `{project_id}` を送信し、その実験を指定プロジェクトに複製（新しい実験IDが発番され、以後コピー元とは完全に独立します。コピー元の実験・コピー先のプロジェクトのいずれかが他人のものや存在しないIDなら404）
 - `POST /api/v1/experiments/{id}/analyze` — `{type, params?}` を送信し、その実験の`raw_data`に対して解析を実行（例: `{"type":"linear_regression"}`）。`linear_regression`は`params`に`x_log`/`y_log`（真偽値、既定`false`）を渡すとlog10(x)・log10(y)に対して回帰します（片対数・両対数フィット。非正の値を持つデータ点はそのフィットから除外され、有効な点が2点未満なら`insufficient_data`エラー）。Go APIが実験を取得したうえでPython Workerの`POST /analyze`に中継し、Workerのレスポンス（`{data, error, meta}`）をそのまま返します。Workerに到達できない場合は`502`（`worker_unreachable`）。成功した結果はRedisに24hキャッシュされ（`analysis:{experiment_id}:{type}:{params_hash}`、PDR.md §7）、レスポンスヘッダー`X-Cache: HIT`/`MISS`でキャッシュ命中を確認できます。キャッシュ命中時はDB・Worker呼び出し自体が発生しません。Redisに到達できない場合もキャッシュなしで通常通り動作します
 
 ### セキュリティ・監視
