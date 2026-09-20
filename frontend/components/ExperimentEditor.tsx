@@ -15,7 +15,17 @@ import InfoTooltip from "./InfoTooltip";
 
 const initialState: CreateExperimentState = {};
 
-export default function ExperimentEditor() {
+type Props = {
+  // The project the experiment is saved into. Without it the editor is a
+  // scratchpad: paste data, see the chart, save nothing. That mode is what
+  // the dashboard offers, and it needs no API call and no session -- the
+  // parsing and the chart are entirely client-side -- so it works logged
+  // out too. project_id is NOT NULL (PDR.md section 5), so there is no
+  // third mode where the editor saves without knowing the destination.
+  projectId?: string;
+};
+
+export default function ExperimentEditor({ projectId }: Props) {
   const [state, formAction, pending] = useActionState(
     createExperiment,
     initialState,
@@ -33,78 +43,91 @@ export default function ExperimentEditor() {
     [parsed, extraRoles, customNames],
   );
 
+  const saving = projectId !== undefined;
+
+  const fields = (
+    <>
+      <label className="flex flex-col gap-1 text-sm text-zinc-700 dark:text-zinc-300">
+        タイトル（任意）
+        <input
+          type="text"
+          name="title"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          className="rounded-md border border-zinc-300 bg-transparent px-3 py-2 text-sm dark:border-zinc-700"
+        />
+      </label>
+
+      <PasteDataFields
+        pastedText={pastedText}
+        onPastedTextChange={setPastedText}
+        parsed={parsed}
+        extraRoles={extraRoles}
+        customNames={customNames}
+        onRoleChange={(col, value) =>
+          setExtraRoles((prev) => ({ ...prev, [col]: value }))
+        }
+        onCustomNameChange={(col, value) =>
+          setCustomNames((prev) => ({ ...prev, [col]: value }))
+        }
+        placeholder={"0\t1\n1\t3\n2\t5"}
+      />
+
+      <div className="flex flex-col gap-4 rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
+        <h2 className="flex items-center gap-1.5 text-sm font-medium text-zinc-500 dark:text-zinc-400">
+          軸ラベル
+          <InfoTooltip text="任意入力です。$...$で囲んだ部分だけTeXの数式として斜体表示、それ以外は日本語も含めそのまま立体表示されます（例: 速度 $v$ (m/s)）" />
+        </h2>
+        <AxisLabelInput
+          label="X軸"
+          value={xAxisLabel}
+          onChange={setXAxisLabel}
+        />
+        <AxisLabelInput
+          label="Y軸"
+          value={yAxisLabel}
+          onChange={setYAxisLabel}
+        />
+      </div>
+    </>
+  );
+
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-      <form action={formAction} className="flex flex-col gap-4">
-        <label className="flex flex-col gap-1 text-sm text-zinc-700 dark:text-zinc-300">
-          タイトル（任意）
+      {saving ? (
+        <form action={formAction} className="flex flex-col gap-4">
+          {fields}
+
+          <input type="hidden" name="projectId" value={projectId} />
           <input
-            type="text"
-            name="title"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            className="rounded-md border border-zinc-300 bg-transparent px-3 py-2 text-sm dark:border-zinc-700"
+            type="hidden"
+            name="columns"
+            value={columns ? JSON.stringify(columns) : ""}
           />
-        </label>
+          <input type="hidden" name="xAxisLabel" value={xAxisLabel} />
+          <input type="hidden" name="yAxisLabel" value={yAxisLabel} />
 
-        <PasteDataFields
-          pastedText={pastedText}
-          onPastedTextChange={setPastedText}
-          parsed={parsed}
-          extraRoles={extraRoles}
-          customNames={customNames}
-          onRoleChange={(col, value) =>
-            setExtraRoles((prev) => ({ ...prev, [col]: value }))
-          }
-          onCustomNameChange={(col, value) =>
-            setCustomNames((prev) => ({ ...prev, [col]: value }))
-          }
-          placeholder={"0\t1\n1\t3\n2\t5"}
-        />
+          {state.error && (
+            <p className="text-sm text-red-600 dark:text-red-400">
+              {state.error}
+            </p>
+          )}
 
-        <div className="flex flex-col gap-4 rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
-          <h2 className="flex items-center gap-1.5 text-sm font-medium text-zinc-500 dark:text-zinc-400">
-            軸ラベル
-            <InfoTooltip text="任意入力です。$...$で囲んだ部分だけTeXの数式として斜体表示、それ以外は日本語も含めそのまま立体表示されます（例: 速度 $v$ (m/s)）" />
-          </h2>
-          <AxisLabelInput
-            label="X軸"
-            value={xAxisLabel}
-            onChange={setXAxisLabel}
-          />
-          <AxisLabelInput
-            label="Y軸"
-            value={yAxisLabel}
-            onChange={setYAxisLabel}
-          />
-        </div>
-
-        <input
-          type="hidden"
-          name="columns"
-          value={columns ? JSON.stringify(columns) : ""}
-        />
-        <input type="hidden" name="xAxisLabel" value={xAxisLabel} />
-        <input type="hidden" name="yAxisLabel" value={yAxisLabel} />
-
-        {state.error && (
-          <p className="text-sm text-red-600 dark:text-red-400">
-            {state.error}
-          </p>
-        )}
-
-        <button
-          type="submit"
-          disabled={pending || !columns}
-          className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900"
-        >
-          {pending ? "保存中..." : "保存してグラフを確定"}
-        </button>
-      </form>
+          <button
+            type="submit"
+            disabled={pending || !columns}
+            className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900"
+          >
+            {pending ? "保存中..." : "保存してグラフを確定"}
+          </button>
+        </form>
+      ) : (
+        <div className="flex flex-col gap-4">{fields}</div>
+      )}
 
       <div className="flex flex-col gap-2">
         <h2 className="text-sm font-medium text-zinc-500 dark:text-zinc-400">
-          プレビュー（未保存）
+          {saving ? "プレビュー（未保存）" : "グラフ"}
         </h2>
         {columns ? (
           <ExperimentChart
