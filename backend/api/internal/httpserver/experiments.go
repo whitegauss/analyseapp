@@ -15,6 +15,10 @@ type createExperimentRequest struct {
 	Config  map[string]any `json:"config"`
 }
 
+type copyExperimentRequest struct {
+	ProjectID string `json:"project_id"`
+}
+
 type updateConfigRequest struct {
 	Config map[string]any `json:"config"`
 }
@@ -160,6 +164,68 @@ func handleListProjectExperiments(repo experiments.Store, projectRepo projects.S
 		}
 
 		response.WriteData(w, http.StatusOK, list)
+	}
+}
+
+// handleCopyExperiment serves POST /api/v1/experiments/{id}/copy, taking
+// {"project_id": "..."} for the destination. The copy is a new, independent
+// experiment (PDR.md section 5): editing either one afterwards leaves the
+// other alone.
+//
+// It stays on the flat path even though it writes into a project, because
+// what it acts on is the one experiment named by {id} -- the same rule that
+// keeps GET/DELETE /experiments/{id} off the nested paths (PDR.md section
+// 8). The destination goes in the body rather than the URL for the same
+// reason: it is an argument to the copy, not the resource being addressed.
+//
+// Nothing is evicted from the cache here (PDR.md section 7). The copy has a
+// new experiment id, so it inherits none of the source's
+// analysis:{experiment_id}:* entries, and the source's own results still
+// describe data that has not changed -- unlike
+// handleUpdateExperimentRawData, which does have to clear them.
+func handleCopyExperiment(repo experiments.Store, projectRepo projects.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID, ok := requireUserID(w, r)
+		if !ok {
+			return
+		}
+		id, ok := parseIDParam(w, r)
+		if !ok {
+			return
+		}
+
+		var req copyExperimentRequest
+		if !decodeJSONBody(w, r, &req) {
+			return
+		}
+		if req.ProjectID == "" {
+			response.WriteError(w, http.StatusBadRequest, "invalid_project_id", "project_id is required")
+			return
+		}
+		targetProjectID, err := parseID(req.ProjectID)
+		if err != nil {
+			response.WriteError(w, http.StatusBadRequest, "invalid_project_id", "project_id is not a valid UUID")
+			return
+		}
+
+		// Two ids can be wrong here, and Store.Copy reports both the same
+		// way, so the destination is read first to be able to say which.
+		// Both answers are still the plain 404 a nonexistent id gets, so
+		// neither confirms that someone else's id exists. Copy keeps its
+		// own ownership guard for the destination regardless -- this check
+		// narrows the message, it is not what makes the write safe.
+		if _, err := projectRepo.GetByID(r.Context(), targetProjectID, userID); err != nil {
+			writeProjectError(w, err, "get project")
+			return
+		}
+
+		e, err := repo.Copy(r.Context(), id, userID, targetProjectID)
+		if err != nil {
+			writeExperimentError(w, err, "copy experiment")
+			return
+		}
+
+		response.WriteData(w, http.StatusCreated, e)
 	}
 }
 

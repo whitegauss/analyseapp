@@ -716,6 +716,56 @@ paths:
                 error: { code: worker_unreachable, message: "failed to reach analysis worker" }
                 meta: {}
 
+  /api/v1/experiments/{id}/copy:
+    post:
+      tags: [experiments]
+      summary: Copy an experiment into another project
+      description: >-
+        コピー元の実験を複製して、ボディで指定したプロジェクトに新しい実験として
+        保存する（PDR.md §5: 他プロジェクトのデータは参照ではなくコピーで取り込む）。
+        新しい実験 ID が発番され、以後コピー元とコピー先は完全に独立する。
+        コピー元の実験・コピー先のプロジェクトのいずれかが他人のもの / 存在しない
+        場合は 404。キャッシュは新しい実験 ID になるため引き継がれず、
+        コピー元の解析結果も変わらないので無効化は発生しない（PDR.md §7）。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ExperimentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CopyExperimentRequest"
+            example:
+              project_id: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+      responses:
+        "201":
+          description: Created — the copy, with its own id
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Experiment"
+        "400":
+          description: Malformed body, `project_id` missing, or either id is not a valid UUID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Envelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
 components:
   securitySchemes:
     bearerAuth:
@@ -913,6 +963,15 @@ components:
           $ref: "#/components/schemas/DataSeries"
         config:
           $ref: "#/components/schemas/ExperimentConfig"
+
+    CopyExperimentRequest:
+      type: object
+      required: [project_id]
+      properties:
+        project_id:
+          description: コピー先のプロジェクト。呼び出したユーザーが所有していなければ 404
+          type: string
+          format: uuid
 
     UpdateConfigRequest:
       type: object

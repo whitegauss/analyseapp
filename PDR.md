@@ -139,7 +139,7 @@ erDiagram
 | 1 | DB マイグレーション（`projects`テーブル）＋ Go 側の projects CRUD（`/api/v1/projects`系5エンドポイント） | 完了（2026-08-18、migration version 6） |
 | 2 | `experiments`への`project_id`反映（`00007`マイグレーション＋データ移行、`experiments.Store`／ハンドラーの更新、実験作成をネストパス`/projects/{id}/experiments`へ移動） | 完了（2026-09-20、migration version 7。ネストパス`GET/POST /api/v1/projects/{id}/experiments`を追加。フラットな`POST /api/v1/experiments`は既定プロジェクト行きとして併存させ、廃止するかは Stage 3 で判断する） |
 | 3 | フロントエンドのプロジェクト画面（`/projects`一覧・`/projects/{id}`配下の実験一覧、作成フローでのプロジェクト選択、ヘッダー導線） | 未着手 |
-| 4 | 実験のコピー機能（`POST /api/v1/experiments/{id}/copy`＋コピー先を選ぶ UI） | 未着手 |
+| 4 | 実験のコピー機能（`POST /api/v1/experiments/{id}/copy`＋コピー先を選ぶ UI） | 着手中（API は完了（2026-09-20）。コピー先を選ぶ UI は Stage 3 のプロジェクト画面が入ってから） |
 
 Stage 2 の既存データ移行は、`project_id`を nullable で追加 → ユーザーごとに「未分類」プロジェクトを作って既存の実験を割り当て → `set not null`、の順に分けて書く。いきなり`NOT NULL`を付けると既存行のある環境で失敗する。
 
