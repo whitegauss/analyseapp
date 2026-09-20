@@ -2,16 +2,11 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import type { ExperimentWithProject } from "@/lib/dashboard";
 import DeleteExperimentButton from "./DeleteExperimentButton";
 
-type ExperimentSummary = {
-  id: string;
-  title: string | null;
-  created_at: string;
-};
-
 type Props = {
-  experiments: ExperimentSummary[];
+  experiments: ExperimentWithProject[];
 };
 
 export default function ExperimentListWithCompare({ experiments }: Props) {
@@ -71,11 +66,14 @@ export default function ExperimentListWithCompare({ experiments }: Props) {
               href={`/experiments/${e.id}`}
               className="flex min-w-0 flex-1 items-center justify-between gap-4"
             >
-              <span className="truncate text-sm text-zinc-900 dark:text-zinc-50">
+              <span className="min-w-0 truncate text-sm text-zinc-900 dark:text-zinc-50">
                 {e.title ?? "(無題)"}
               </span>
-              <span className="shrink-0 text-xs text-zinc-500 dark:text-zinc-400">
-                {e.created_at.slice(0, 10)}
+              <span className="flex shrink-0 items-center gap-3 text-xs text-zinc-500 dark:text-zinc-400">
+                {e.projectTitle && (
+                  <span className="max-w-32 truncate">{e.projectTitle}</span>
+                )}
+                <span>{e.created_at.slice(0, 10)}</span>
               </span>
             </Link>
             <DeleteExperimentButton id={e.id} title={e.title ?? "(無題)"} />

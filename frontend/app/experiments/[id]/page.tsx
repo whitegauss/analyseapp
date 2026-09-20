@@ -5,12 +5,15 @@ import { fetchRegression } from "@/app/experiments/actions";
 import ExperimentChart from "@/components/ExperimentChart";
 import AxisLabelEditor from "@/components/AxisLabelEditor";
 import RawDataEditor from "@/components/RawDataEditor";
+import CopyExperimentButton from "@/components/CopyExperimentButton";
 import CenteredCard from "@/components/CenteredCard";
+import type { ProjectSummary } from "@/lib/dashboard";
 
 export const dynamic = "force-dynamic";
 
 type Experiment = {
   id: string;
+  project_id: string;
   title: string | null;
   raw_data: { columns: Record<string, number[]> };
   config: Record<string, unknown>;
@@ -37,6 +40,14 @@ export default async function ExperimentPage({
   if (!experiment) {
     redirect("/login");
   }
+
+  // The copy destinations. Read separately rather than folded into the
+  // fetch above, because a failure here must not take the page with it:
+  // being unable to offer a copy is worth losing the picker over, not the
+  // experiment.
+  const projects = await callGoApi<ProjectSummary[]>("/api/v1/projects").catch(
+    () => null,
+  );
 
   // Only the default linear-scale fit is computed up front; the log-scale
   // variants (x/y/log-log) are fetched on demand from the client when the
@@ -66,6 +77,13 @@ export default async function ExperimentPage({
           id={experiment.id}
           columns={experiment.raw_data.columns}
         />
+        {projects && (
+          <CopyExperimentButton
+            id={experiment.id}
+            currentProjectId={experiment.project_id}
+            projects={projects}
+          />
+        )}
         <a
           href={`/experiments/${experiment.id}/export`}
           className="self-start text-xs text-zinc-500 underline hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
