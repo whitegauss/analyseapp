@@ -95,6 +95,7 @@ func registerAPIRoutes(r chi.Router, repo experiments.Store, projectRepo project
 	r.Patch("/experiments/{id}/raw_data", handleUpdateExperimentRawData(repo, resultCache))
 	r.Post("/experiments/{id}/analyze", handleAnalyzeExperiment(repo, workerClient, resultCache))
 	r.Post("/experiments/{id}/copy", handleCopyExperiment(repo, projectRepo))
+	r.Patch("/experiments/{id}/project", handleMoveExperiment(repo, projectRepo))
 
 	// Collections hang off the project; operations on a single experiment
 	// keep the flat /experiments/{id} paths above, since an experiment id

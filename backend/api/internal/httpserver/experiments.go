@@ -19,6 +19,13 @@ type copyExperimentRequest struct {
 	ProjectID string `json:"project_id"`
 }
 
+// moveExperimentRequest is PATCH /experiments/{id}/project's body. Named
+// for the operation rather than the path, because updateProjectRequest is
+// already the projects handlers' own body type.
+type moveExperimentRequest struct {
+	ProjectID string `json:"project_id"`
+}
+
 type updateConfigRequest struct {
 	Config map[string]any `json:"config"`
 }
@@ -226,6 +233,64 @@ func handleCopyExperiment(repo experiments.Store, projectRepo projects.Store) ht
 		}
 
 		response.WriteData(w, http.StatusCreated, e)
+	}
+}
+
+// handleMoveExperiment serves PATCH /api/v1/experiments/{id}/project,
+// taking {"project_id": "..."} for the new home. A sub-resource path like
+// the /config and /raw_data patches beside it, rather than a general PATCH
+// on the experiment that happens to honour only one field.
+//
+// The move keeps the experiment's id, so links, bookmarks and the CSV
+// export URL survive it -- which is what makes it different from copying
+// into the destination and deleting the source (KAN-87).
+//
+// Nothing is evicted from the cache (PDR.md section 7): the key
+// analysis:{experiment_id}:* does not mention the project, and raw_data is
+// untouched, so the cached results still describe this experiment
+// correctly.
+func handleMoveExperiment(repo experiments.Store, projectRepo projects.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID, ok := requireUserID(w, r)
+		if !ok {
+			return
+		}
+		id, ok := parseIDParam(w, r)
+		if !ok {
+			return
+		}
+
+		var req moveExperimentRequest
+		if !decodeJSONBody(w, r, &req) {
+			return
+		}
+		if req.ProjectID == "" {
+			response.WriteError(w, http.StatusBadRequest, "invalid_project_id", "project_id is required")
+			return
+		}
+		targetProjectID, err := parseID(req.ProjectID)
+		if err != nil {
+			response.WriteError(w, http.StatusBadRequest, "invalid_project_id", "project_id is not a valid UUID")
+			return
+		}
+
+		// Same shape as handleCopyExperiment: two ids can be wrong and the
+		// store reports both as its own ErrNotFound, so the destination is
+		// read first to say which. Both remain the plain 404 an unknown id
+		// gets. Store.UpdateProject keeps its own guard on the destination
+		// -- this only narrows the message.
+		if _, err := projectRepo.GetByID(r.Context(), targetProjectID, userID); err != nil {
+			writeProjectError(w, err, "get project")
+			return
+		}
+
+		e, err := repo.UpdateProject(r.Context(), id, userID, targetProjectID)
+		if err != nil {
+			writeExperimentError(w, err, "move experiment")
+			return
+		}
+
+		response.WriteData(w, http.StatusOK, e)
 	}
 }
 

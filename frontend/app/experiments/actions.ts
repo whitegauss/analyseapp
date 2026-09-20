@@ -138,6 +138,29 @@ export async function copyExperiment(
   );
 }
 
+export type MoveExperimentState = { error?: string };
+
+// Re-parents an experiment (KAN-87). Unlike copyExperiment this keeps the
+// id, so it lands back on the same page -- the experiment the user was
+// looking at is still the experiment they are looking at, just filed
+// somewhere else.
+export async function moveExperiment(
+  _prevState: MoveExperimentState,
+  formData: FormData,
+): Promise<MoveExperimentState> {
+  const id = String(formData.get("id") ?? "");
+  if (!id) return { error: "実験IDが不正です" };
+
+  const projectId = String(formData.get("projectId") ?? "");
+  if (!projectId) return { error: "移動先のプロジェクトを選んでください" };
+
+  return submitAndRedirect<Experiment>(
+    `/api/v1/experiments/${id}/project`,
+    { method: "PATCH", body: JSON.stringify({ project_id: projectId }) },
+    () => `/experiments/${id}`,
+  );
+}
+
 export async function deleteExperiment(formData: FormData): Promise<void> {
   const id = String(formData.get("id") ?? "");
   if (!id) return;
