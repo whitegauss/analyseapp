@@ -99,7 +99,12 @@ Python Workerは`WORKER_PYTHON`、`backend/worker/.venv/bin/python`、`python3`�
 
 Go API GatewayのAPI構成は [backend/api/openapi.yaml](./backend/api/openapi.yaml)（OpenAPI 3.0 / Swagger）にまとめています。[Swagger Editor](https://editor.swagger.io/) 等に貼り付けると一覧・スキーマを確認できます。
 
-**プロジェクト機能への移行中**（2026-08-16〜、ステージ分けと現在地は [PDR.md](./PDR.md) §5「プロジェクト機能への移行ステージ」を参照）: `GET/POST/PATCH/DELETE /api/v1/projects`・`/api/v1/projects/{id}`は実装済みで動作しますが、まだ`experiments`とは接続されていません（`experiments.project_id`はStage 2で追加予定）。それまでは以下の`/api/v1/experiments`系がこれまで通りの唯一の実験操作手段です。
+**プロジェクト機能への移行中**（2026-08-16〜、ステージ分けと現在地は [PDR.md](./PDR.md) §5「プロジェクト機能への移行ステージ」を参照）: Stage 2 まで完了し、実験は必ず1つのプロジェクトに属します（`experiments.project_id`は`NOT NULL`）。プロジェクト側は`GET/POST/PATCH/DELETE /api/v1/projects`・`/api/v1/projects/{id}`に加えて、配下の実験を扱う以下の2つがあります。
+
+- `GET /api/v1/projects/{id}/experiments` — そのプロジェクト配下の実験を作成日時の新しい順に一覧取得（他人のIDや存在しないIDは404。中身が空のプロジェクトは空配列を返す200で、404とは区別されます）
+- `POST /api/v1/projects/{id}/experiments` — `{title, raw_data, config?}` を送信し、URLで指定したプロジェクトに実験を作成（他人のIDや存在しないIDは404）
+
+フロントエンドのプロジェクト画面はStage 3で、それまでフロントは下記のフラットな作成パスを使います。
 
 `/api/v1/experiments`系のエンドポイントは全てSupabase AuthのJWT（`Authorization: Bearer <access_token>`）が必須です。curlで試す場合、Supabase AuthのREST APIでサインアップ/サインインしてトークンを取得できます。
 
@@ -110,8 +115,8 @@ curl -X POST "$SUPABASE_URL/auth/v1/signup" \
 # レスポンスの access_token を使う
 ```
 
-- `POST /api/v1/experiments` — `{title, raw_data, config?}` を送信し実験を作成（`title`は省略・`null`可。空文字は`null`として保存されます）
-- `GET /api/v1/experiments` — 自分が作成した実験を作成日時の新しい順に一覧取得（ページネーションなし）
+- `POST /api/v1/experiments` — `{title, raw_data, config?}` を送信し実験を作成（`title`は省略・`null`可。空文字は`null`として保存されます）。プロジェクトを指定しない作成パスで、実験は既定プロジェクト「未分類」に入ります（無ければ自動作成）
+- `GET /api/v1/experiments` — 自分が作成した実験をプロジェクト横断で作成日時の新しい順に一覧取得（ページネーションなし。コピー元の選択・複数実験の比較で使うため、プロジェクト配下の一覧とは別に残しています）
 - `GET /api/v1/experiments/{id}` — 自分が作成した実験を取得（他人のIDや存在しないIDは404）
 - `DELETE /api/v1/experiments/{id}` — 自分が作成した実験を削除（他人のIDや存在しないIDは404）。関連する`analysis_results`行はDBの`ON DELETE CASCADE`で一緒に削除されます
 - `PATCH /api/v1/experiments/{id}/config` — `{config}` でグラフ設定を丸ごと置き換え

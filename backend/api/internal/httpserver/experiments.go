@@ -23,16 +23,38 @@ type updateRawDataRequest struct {
 	RawData map[string]any `json:"raw_data"`
 }
 
+// parseCreateExperimentRequest decodes and validates the body both create
+// paths share, writing the 400 itself and returning ok=false. Only the
+// project differs between them: the flat path resolves the default one, the
+// nested path takes it from the URL.
+//
+// A title of "" is normalized to nil rather than rejected: the column is
+// nullable and the UI sends an empty field for "not named yet", which
+// should mean the same as omitting it.
+func parseCreateExperimentRequest(w http.ResponseWriter, r *http.Request) (createExperimentRequest, bool) {
+	var req createExperimentRequest
+	if !decodeJSONBody(w, r, &req) {
+		return req, false
+	}
+	if req.Title != nil && *req.Title == "" {
+		req.Title = nil
+	}
+	if req.RawData == nil {
+		response.WriteError(w, http.StatusBadRequest, "invalid_raw_data", "raw_data is required")
+		return req, false
+	}
+	return req, true
+}
+
 // handleCreateExperiment serves the flat POST /api/v1/experiments, which
 // names no project. Every experiment needs one now that project_id is NOT
 // NULL, so the request lands in the user's default project (projects
 // .DefaultTitle), created on first use.
 //
 // The endpoint stays for the same reason the default project exists: the UI
-// has no project picker yet (KAN-27), and the nested
-// POST /api/v1/projects/{id}/experiments that will carry an explicit choice
-// is KAN-25. Keeping this path working is what lets Stage 2 ship without
-// the frontend changing in the same breath.
+// has no project picker yet (KAN-27), so it has nothing to put in the
+// nested POST /api/v1/projects/{id}/experiments below. Whether it is
+// retired once the picker lands is decided there.
 func handleCreateExperiment(repo experiments.Store, projectRepo projects.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID, ok := requireUserID(w, r)
@@ -40,15 +62,8 @@ func handleCreateExperiment(repo experiments.Store, projectRepo projects.Store) 
 			return
 		}
 
-		var req createExperimentRequest
-		if !decodeJSONBody(w, r, &req) {
-			return
-		}
-		if req.Title != nil && *req.Title == "" {
-			req.Title = nil
-		}
-		if req.RawData == nil {
-			response.WriteError(w, http.StatusBadRequest, "invalid_raw_data", "raw_data is required")
+		req, ok := parseCreateExperimentRequest(w, r)
+		if !ok {
 			return
 		}
 
@@ -70,6 +85,81 @@ func handleCreateExperiment(repo experiments.Store, projectRepo projects.Store) 
 		}
 
 		response.WriteData(w, http.StatusCreated, e)
+	}
+}
+
+// handleCreateProjectExperiment serves POST
+// /api/v1/projects/{id}/experiments: the create path that names its project
+// explicitly (PDR.md section 8 -- collections hang off the project, while
+// operations on one experiment stay on the flat /experiments/{id} paths,
+// since an experiment id is unique on its own).
+//
+// The project id is not checked here before inserting. Store.Create guards
+// the insert with "where exists (select 1 from projects where id = $2 and
+// user_id = $1)", so an id belonging to someone else writes nothing and
+// comes back as ErrNotFound -- one query, and no window between the check
+// and the insert.
+func handleCreateProjectExperiment(repo experiments.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID, ok := requireUserID(w, r)
+		if !ok {
+			return
+		}
+		projectID, ok := parseIDParam(w, r)
+		if !ok {
+			return
+		}
+		req, ok := parseCreateExperimentRequest(w, r)
+		if !ok {
+			return
+		}
+
+		// No EnsureProfile, unlike the flat path: the insert only succeeds
+		// for a project this user already owns, and projects.user_id
+		// references profiles, so the row this would create is guaranteed
+		// to exist already.
+		e, err := repo.Create(r.Context(), userID, projectID, req.Title, req.RawData, req.Config)
+		if err != nil {
+			writeNestedExperimentError(w, err, "create experiment")
+			return
+		}
+
+		response.WriteData(w, http.StatusCreated, e)
+	}
+}
+
+// handleListProjectExperiments serves GET
+// /api/v1/projects/{id}/experiments. The cross-project
+// GET /api/v1/experiments stays alongside it (PDR.md section 8): choosing a
+// copy source and comparing experiments both need every project at once.
+func handleListProjectExperiments(repo experiments.Store, projectRepo projects.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID, ok := requireUserID(w, r)
+		if !ok {
+			return
+		}
+		projectID, ok := parseIDParam(w, r)
+		if !ok {
+			return
+		}
+
+		// The project is read first purely to answer 404 for one that isn't
+		// this user's. ListByProject filters on user_id as well, so it can
+		// never return someone else's rows -- but it would answer an empty
+		// array for a stranger's project id just as it does for an empty
+		// one of the user's own, and a 200 there says the id exists.
+		if _, err := projectRepo.GetByID(r.Context(), projectID, userID); err != nil {
+			writeProjectError(w, err, "get project")
+			return
+		}
+
+		list, err := repo.ListByProject(r.Context(), projectID, userID)
+		if err != nil {
+			response.WriteError(w, http.StatusInternalServerError, "internal_error", "failed to list experiments")
+			return
+		}
+
+		response.WriteData(w, http.StatusOK, list)
 	}
 }
 

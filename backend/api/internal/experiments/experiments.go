@@ -41,6 +41,7 @@ type Store interface {
 	Create(ctx context.Context, userID, projectID uuid.UUID, title *string, rawData, config map[string]any) (Experiment, error)
 	GetByID(ctx context.Context, id, userID uuid.UUID) (Experiment, error)
 	ListByUser(ctx context.Context, userID uuid.UUID) ([]Experiment, error)
+	ListByProject(ctx context.Context, projectID, userID uuid.UUID) ([]Experiment, error)
 	UpdateConfig(ctx context.Context, id, userID uuid.UUID, config map[string]any) (Experiment, error)
 	UpdateRawData(ctx context.Context, id, userID uuid.UUID, rawData map[string]any) (Experiment, error)
 	Delete(ctx context.Context, id, userID uuid.UUID) error
@@ -110,15 +111,12 @@ func (r *Repository) GetByID(ctx context.Context, id, userID uuid.UUID) (Experim
 	)
 }
 
-// ListByUser returns all of userID's experiments, most recently created
-// first. Always non-nil, even when there are no rows, so callers can
-// serialize it directly as a JSON array.
-func (r *Repository) ListByUser(ctx context.Context, userID uuid.UUID) ([]Experiment, error) {
-	rows, err := r.pool.Query(ctx,
-		`select id, user_id, project_id, title, raw_data, config, created_at, updated_at
-		 from experiments where user_id = $1 order by created_at desc`,
-		userID,
-	)
+// queryExperiments runs a query returning any number of experiments rows (in
+// the same column order queryRowExperiment expects) and scans them all. The
+// result is always non-nil, even when there are no rows, so callers can
+// serialize it directly as a JSON array rather than as null.
+func (r *Repository) queryExperiments(ctx context.Context, query string, args ...any) ([]Experiment, error) {
+	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -136,6 +134,33 @@ func (r *Repository) ListByUser(ctx context.Context, userID uuid.UUID) ([]Experi
 		return nil, err
 	}
 	return list, nil
+}
+
+// ListByUser returns all of userID's experiments across every project, most
+// recently created first. The cross-project view stays (PDR.md section 8):
+// picking a copy source and comparing experiments both need it.
+func (r *Repository) ListByUser(ctx context.Context, userID uuid.UUID) ([]Experiment, error) {
+	return r.queryExperiments(ctx,
+		`select id, user_id, project_id, title, raw_data, config, created_at, updated_at
+		 from experiments where user_id = $1 order by created_at desc`,
+		userID,
+	)
+}
+
+// ListByProject returns the experiments in one project, most recently
+// created first. userID is part of the filter rather than a separate
+// ownership lookup, so another user's rows can never come back even if
+// projectID somehow names their project.
+//
+// An empty result says nothing about whether the project exists: callers
+// that need to tell "no experiments yet" from "no such project" check the
+// project itself first (handleListProjectExperiments does).
+func (r *Repository) ListByProject(ctx context.Context, projectID, userID uuid.UUID) ([]Experiment, error) {
+	return r.queryExperiments(ctx,
+		`select id, user_id, project_id, title, raw_data, config, created_at, updated_at
+		 from experiments where project_id = $1 and user_id = $2 order by created_at desc`,
+		projectID, userID,
+	)
 }
 
 // Delete removes an experiment owned by userID. analysis_results rows for it

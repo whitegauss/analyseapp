@@ -137,7 +137,7 @@ erDiagram
 | Stage | 内容 | 状態 |
 | --- | --- | --- |
 | 1 | DB マイグレーション（`projects`テーブル）＋ Go 側の projects CRUD（`/api/v1/projects`系5エンドポイント） | 完了（2026-08-18、migration version 6） |
-| 2 | `experiments`への`project_id`反映（`00007`マイグレーション＋データ移行、`experiments.Store`／ハンドラーの更新、実験作成をネストパス`/projects/{id}/experiments`へ移動） | 着手中（migration 00007 と Go 側の`project_id`対応は完了、ネストパスは未着手） |
+| 2 | `experiments`への`project_id`反映（`00007`マイグレーション＋データ移行、`experiments.Store`／ハンドラーの更新、実験作成をネストパス`/projects/{id}/experiments`へ移動） | 完了（2026-09-20、migration version 7。ネストパス`GET/POST /api/v1/projects/{id}/experiments`を追加。フラットな`POST /api/v1/experiments`は既定プロジェクト行きとして併存させ、廃止するかは Stage 3 で判断する） |
 | 3 | フロントエンドのプロジェクト画面（`/projects`一覧・`/projects/{id}`配下の実験一覧、作成フローでのプロジェクト選択、ヘッダー導線） | 未着手 |
 | 4 | 実験のコピー機能（`POST /api/v1/experiments/{id}/copy`＋コピー先を選ぶ UI） | 未着手 |
 
@@ -145,7 +145,7 @@ Stage 2 の既存データ移行は、`project_id`を nullable で追加 → ユ
 
 **既定プロジェクト「未分類」**: 移行前の実験の置き場所として導入したが、移行後も「プロジェクトを指定しない作成パス」の受け皿として残す。ユーザーごとに1つで、部分ユニークインデックス`projects_user_default_idx`（`title = '未分類'`のみ対象）で重複を防ぐ。`POST /api/v1/experiments`（フラットな作成パス）はこのプロジェクトに実験を入れるため、フロントにプロジェクト選択 UI が入る Stage 3 までの間も従来どおり動く。
 
-Stage 2 完了までは`/api/v1/projects`系は実装済みだが`experiments`と接続されておらず、実験操作は従来どおり`/api/v1/experiments`系が唯一の手段である。
+Stage 3 までフロントには作成先を選ぶ UI が無いため、フロントは引き続きフラットな`POST /api/v1/experiments`を使う。ネストパスは先に API 側だけ用意した状態になる。
 
 なお、このステージ分けは元々ローカルの作業ログ（`.gitignore`対象で共有されない）にだけ書かれており、リポジトリを clone しただけでは辿れなかった（KAN-35）。**Readme や他の共有ドキュメントから参照する情報は、作業ログではなくこの設計ドキュメント側に置く。**
 

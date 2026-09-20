@@ -69,27 +69,43 @@ func NewRouter(dbPool *pgxpool.Pool, jwks keyfunc.Keyfunc, workerClient worker.C
 			r.Use(auth.Middleware(jwks))
 
 			if dbPool != nil {
-				repo := experiments.NewRepository(dbPool)
-				projectRepo := projects.NewRepository(dbPool)
-				r.Post("/experiments", handleCreateExperiment(repo, projectRepo))
-				r.Get("/experiments", handleListExperiments(repo))
-				r.Get("/experiments/{id}", handleGetExperiment(repo))
-				r.Delete("/experiments/{id}", handleDeleteExperiment(repo))
-				r.Patch("/experiments/{id}/config", handleUpdateExperimentConfig(repo))
-				r.Patch("/experiments/{id}/raw_data", handleUpdateExperimentRawData(repo, resultCache))
-				r.Post("/experiments/{id}/analyze", handleAnalyzeExperiment(repo, workerClient, resultCache))
-
-				r.Post("/projects", handleCreateProject(projectRepo))
-				r.Get("/projects", handleListProjects(projectRepo))
-				r.Get("/projects/{id}", handleGetProject(projectRepo))
-				r.Patch("/projects/{id}", handleUpdateProject(projectRepo))
-				r.Delete("/projects/{id}", handleDeleteProject(projectRepo))
+				registerAPIRoutes(r,
+					experiments.NewRepository(dbPool),
+					projects.NewRepository(dbPool),
+					workerClient, resultCache,
+				)
 			}
 			// convert (PDR.md section 8) lands here in follow-up work.
 		})
 	}
 
 	return r
+}
+
+// registerAPIRoutes hangs every DB-backed /api/v1 route off r. Split out of
+// NewRouter, and taking the stores rather than the pool, so the routing
+// table can be walked in a test: a handler that is written but never wired
+// up passes its own test and 404s in production.
+func registerAPIRoutes(r chi.Router, repo experiments.Store, projectRepo projects.Store, workerClient worker.Client, resultCache cache.Cache) {
+	r.Post("/experiments", handleCreateExperiment(repo, projectRepo))
+	r.Get("/experiments", handleListExperiments(repo))
+	r.Get("/experiments/{id}", handleGetExperiment(repo))
+	r.Delete("/experiments/{id}", handleDeleteExperiment(repo))
+	r.Patch("/experiments/{id}/config", handleUpdateExperimentConfig(repo))
+	r.Patch("/experiments/{id}/raw_data", handleUpdateExperimentRawData(repo, resultCache))
+	r.Post("/experiments/{id}/analyze", handleAnalyzeExperiment(repo, workerClient, resultCache))
+
+	// Collections hang off the project; operations on a single experiment
+	// keep the flat /experiments/{id} paths above, since an experiment id
+	// is unique on its own (PDR.md section 8).
+	r.Post("/projects/{id}/experiments", handleCreateProjectExperiment(repo))
+	r.Get("/projects/{id}/experiments", handleListProjectExperiments(repo, projectRepo))
+
+	r.Post("/projects", handleCreateProject(projectRepo))
+	r.Get("/projects", handleListProjects(projectRepo))
+	r.Get("/projects/{id}", handleGetProject(projectRepo))
+	r.Patch("/projects/{id}", handleUpdateProject(projectRepo))
+	r.Delete("/projects/{id}", handleDeleteProject(projectRepo))
 }
 
 // handleHealthz is a pure liveness check: it never touches dependencies, so
