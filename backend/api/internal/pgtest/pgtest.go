@@ -45,6 +45,11 @@ create schema if not exists auth;
 create table if not exists auth.users (id uuid primary key);
 `
 
+// migrateLockKey is an arbitrary constant: pg_advisory_lock only needs the
+// waiters to agree on a number, and nothing else in this app takes advisory
+// locks.
+const migrateLockKey = 8931274
+
 var (
 	migrateOnce sync.Once
 	migrateErr  error
@@ -87,17 +92,39 @@ func Pool(t *testing.T) *pgxpool.Pool {
 // uses, so what the tests run against is what production runs against --
 // a hand-maintained copy of the DDL would drift and take the tests' value
 // with it.
+//
+// sync.Once only makes this once per process, and `go test ./...` runs one
+// process per package: against an empty database they all arrive here at
+// the same moment. "create schema if not exists" is not safe under that --
+// two backends both see it missing and both insert, and the loser gets a
+// duplicate key on pg_namespace. Neither is goose's first run, which has
+// its own version table to create. So the whole thing is serialized on an
+// advisory lock: the first process migrates, the rest wait and then find
+// the work already done (goose and the stub are both idempotent once they
+// are not racing).
 func migrate(url string) error {
 	db, err := sql.Open("pgx", url)
 	if err != nil {
 		return err
 	}
 	defer func() {
-		// This connection exists only to run goose; the pool the tests use
-		// is a separate one. A failed close here has nothing left to
-		// affect, so there is nothing to report it to.
+		// Closing releases the session lock too, so the unlock below is
+		// belt and braces. This connection exists only to run goose -- the
+		// pool the tests use is a separate one -- so a failed close has
+		// nothing left to affect and nothing to report it to.
 		_ = db.Close()
 	}()
+
+	// pg_advisory_lock is held by the session, so the lock and the work
+	// after it have to run on the same connection. Capping the pool at one
+	// is the simplest way to guarantee that for a database/sql handle that
+	// goose also uses.
+	db.SetMaxOpenConns(1)
+
+	if _, err := db.Exec(`select pg_advisory_lock($1)`, migrateLockKey); err != nil {
+		return err
+	}
+	defer func() { _, _ = db.Exec(`select pg_advisory_unlock($1)`, migrateLockKey) }()
 
 	if _, err := db.Exec(authUsersStub); err != nil {
 		return err
