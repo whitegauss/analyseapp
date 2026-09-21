@@ -9,6 +9,10 @@ scripts/test.sh              # 3スタック全部。成功すると1スタッ�
 scripts/test.sh api          # 単一（all | frontend | api | worker）
 scripts/test.sh --cov        # カバレッジ付き
 scripts/test.sh --full       # 失敗時の出力を省略しない
+
+# リポジトリ層の SQL テストも含める（使い捨ての Postgres が要る）
+docker run --rm -d -p 5433:5432 -e POSTGRES_PASSWORD=postgres --name analyseapp-test-db postgres:16
+TEST_DATABASE_URL='postgres://postgres:postgres@localhost:5433/postgres?sslmode=disable' scripts/test.sh api
 ```
 
 失敗したときは**失敗したスイートの出力だけ**が出る（既定で末尾80行、`MAX_FAIL_LINES` で変更可）。全文は常に `.test-logs/<suite>.log` に残る。CI も同じスクリプトを呼ぶので、手元と CI で実行方法が食い違わない。
@@ -25,7 +29,7 @@ scripts/test.sh --full       # 失敗時の出力を省略しない
 
 ### Go
 
-ハンドラーは[インターフェース経由で依存を受け取る](architecture.md#依存を注入する境界テストが成立している理由)ので、DB も Redis も立てずに回る。フェイクは `backend/api/internal/httpserver/fakes_test.go` にある。
+ハンドラーは[インターフェース経由で依存を受け取る](architecture.md#依存を注入する境界テストが成立している理由)ので、DB も Redis も立てずに回る。フェイク（`fakeStore` / `fakeProjectStore`）は現状 `backend/api/internal/httpserver/experiments_test.go` と `projects_test.go` にそれぞれ置いてある（共通ファイルへの分離は KAN-38）。
 
 検証やエラー写像は `backend/api/internal/httpserver/errors.go` / `backend/api/internal/httpserver/validate.go` に純粋関数として出してある。**ハンドラー経由でしか踏めない分岐を作らないこと** — `writeExperimentError` はかつてカバレッジ 75% で、それは「500 になる分岐が一度も実行されていない」という意味だった。
 
@@ -34,6 +38,23 @@ scripts/test.sh --full       # 失敗時の出力を省略しない
 計算は `lib/` に置き、コンポーネントは呼ぶだけにする（[依存の向き](architecture.md#lib-と-components-の依存の向き)）。
 
 **`useMemo` の中に書かれた計算は特に見落としやすい。** 実例: 回帰の ±1σ 帯を求める `boundsAt` は `regressionBand` の `useMemo` の中にインラインで書かれていて、コンポーネントを描画しない限り触れなかった。物理実験の誤差帯という、間違えても画面上は「それっぽく」見えてしまう計算がテスト不能な位置にあった。
+
+#### フェイクで届かないところ: リポジトリ層の SQL
+
+**フェイクは、問い合わせが何を問い合わせているかを一切保証しない。** `fakeStore` は渡されたとおりに答えるので、`GetByID` の SQL から `and user_id = $2` が消えてもハンドラーテストは全部緑のまま通る。この app の認可はその1行が全てなので、そこだけは実 DB に当てて確かめる（KAN-31）。
+
+```bash
+TEST_DATABASE_URL=... go test -tags=integration ./...
+```
+
+- `//go:build integration` で分けてある。**タグ無しの `go test ./...` は DB 無しで通る**状態を保つこと
+- ハーネスは `backend/api/internal/pgtest`。スキーマは `cmd/migrate` と同じ goose 経路で作るので、本番と同じ DDL に当たる（DDL を手で書き写すとすぐ乖離して、テストの意味が消える）
+- `profiles.id` が `auth.users (id)` を参照しており、これは Supabase 側のテーブルなので素の Postgres には無い。`pgtest` が FK に必要な1列だけのスタブを先に作る
+- テストは1つの DB を共有し、**ユーザーごとに別の uuid を持つことで独立する**。テストごとに DB を作るより速いうえ、本番と同じ「user_id で絞る」経路をそのまま踏む
+
+ここに書くべきなのは、**フェイクでは原理的に検知できない退行**に限る。所有者による絞り込み、`on delete cascade`、`on conflict do nothing` による競合対策、部分ユニークインデックス、jsonb の往復、`order by` の向き。バリデーションや分岐はハンドラー側で足りる。
+
+新しく書いたら**わざと壊して落ちることを確かめる**。`and user_id = $2` を消してテストが赤くなって初めて、そのテストは認可を守っている。
 
 ### Python
 
@@ -45,7 +66,7 @@ scripts/test.sh --full       # 失敗時の出力を省略しない
 
 | 領域     | 道具                                                                      |
 | -------- | ------------------------------------------------------------------------- |
-| Go       | 標準 `testing` + `net/http/httptest`。Redis は `miniredis`                |
+| Go       | 標準 `testing` + `net/http/httptest`。Redis は `miniredis`、Postgres は使い捨てコンテナ（testcontainers は入れない — 接続文字列1つで足りる） |
 | フロント | Vitest。UI は今後 jsdom + Testing Library + Storybook の `composeStories` |
 | Python   | pytest                                                                    |
 

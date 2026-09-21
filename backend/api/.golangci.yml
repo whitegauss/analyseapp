@@ -1,5 +1,12 @@
 version: "2"
 
+run:
+  # The DB-backed tests (internal/pgtest and the *_integration_test.go
+  # files) are behind this tag, so without it the linter would not look at
+  # them at all.
+  build-tags:
+    - integration
+
 linters:
   default: standard
   # standard = errcheck, govet, ineffassign, staticcheck, unused

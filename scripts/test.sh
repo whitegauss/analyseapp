@@ -9,8 +9,11 @@
 # kept under .test-logs/ so nothing is lost.
 #
 # Environment:
-#   WORKER_PYTHON   python interpreter used for the worker suite
-#   MAX_FAIL_LINES  lines of failure output to show per suite (default 80)
+#   WORKER_PYTHON      python interpreter used for the worker suite
+#   MAX_FAIL_LINES     lines of failure output to show per suite (default 80)
+#   TEST_DATABASE_URL  a throwaway Postgres. When set, the api suite also
+#                      runs the DB-backed repository tests (-tags=integration);
+#                      when unset they are skipped and the line says so.
 
 set -uo pipefail
 
@@ -95,8 +98,16 @@ report() {
 }
 
 run_api() {
-  local log="$LOG_DIR/api.log" start elapsed code summary
+  local log="$LOG_DIR/api.log" start elapsed code summary db_note=""
   local -a cmd=(go test ./...)
+  # The repository SQL tests need a real Postgres, so they are behind a
+  # build tag and only run when one is pointed at (KAN-31). Same tag CI
+  # uses, so a green run here means the same thing there.
+  if [ -n "${TEST_DATABASE_URL:-}" ]; then
+    cmd=(go test -tags=integration ./...)
+  else
+    db_note="  (no db)"
+  fi
   # -coverpkg=./... credits coverage to every package, so packages without
   # their own tests are not silently dropped from the denominator.
   [ "$cov" -eq 1 ] && cmd+=(-covermode=atomic -coverpkg=./... -coverprofile="$LOG_DIR/api.coverprofile")
@@ -107,7 +118,7 @@ run_api() {
   elapsed="$(elapsed_since "$start")"
 
   if [ "$code" -eq 0 ]; then
-    summary="$(grep -c '^ok' "$log") packages"
+    summary="$(grep -c '^ok' "$log") packages$db_note"
     if [ "$cov" -eq 1 ] && [ -f "$LOG_DIR/api.coverprofile" ]; then
       summary="$summary  $( (cd "$REPO_ROOT/backend/api" && go tool cover -func="$LOG_DIR/api.coverprofile") | awk '/^total:/ {print $3}')"
     fi
