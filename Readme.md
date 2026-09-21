@@ -67,6 +67,16 @@ scripts/test.sh --cov        # カバレッジ付き
 scripts/test.sh --full       # 失敗時の出力を省略せず全部出す
 ```
 
+**Go のリポジトリ層（SQL）のテストだけは実 DB が要ります。** `TEST_DATABASE_URL`を設定すると api スイートに含まれ、未設定なら飛ばして`(no db)`と表示します。使い捨ての Postgres を1つ立てるだけです。
+
+```bash
+docker run --rm -d -p 5433:5432 -e POSTGRES_PASSWORD=postgres --name analyseapp-test-db postgres:16
+TEST_DATABASE_URL='postgres://postgres:postgres@localhost:5433/postgres?sslmode=disable' scripts/test.sh api
+docker rm -f analyseapp-test-db
+```
+
+`DATABASE_URL`ではなく専用の変数にしてあるのは、これらのテストが行を作っては消すためです。変数を1つ設定したままにしただけで本番 DB に向く、という事故の余地を残していません。
+
 失敗したときは**失敗したスイートの出力だけ**を表示します（既定で末尾80行、`MAX_FAIL_LINES`で変更可）。全文は常に`.test-logs/<suite>.log`に残るので、切り詰められても失われません。いずれかのスイートが落ちると非ゼロで終了します。
 
 Python Workerは`WORKER_PYTHON`、`backend/worker/.venv/bin/python`、`python3`の順にインタープリターを探します。ローカルでは`backend/worker/.venv`を作っておくのが楽です。
@@ -89,7 +99,8 @@ Python Workerは`WORKER_PYTHON`、`backend/worker/.venv/bin/python`、`python3`�
   - フォーマット: `npm run format`で整形、`npm run format:check`でCIと同じチェックのみ（[Prettier](https://prettier.io/)、`.prettierrc.json`）
   - ビルド: `npx next build`
 - Go API: `cd backend/api`
-  - テスト: `go build ./... && go vet ./... && go test ./...`（`internal/response`のエンベロープ整形、`internal/httpserver`のハンドラー検証ロジックをfake store（`experiments.Store`インターフェース）でテスト。DBを要する`experiments.Repository`のSQL自体は今回未カバー）
+  - テスト: `go build ./... && go vet ./... && go test ./...`（`internal/response`のエンベロープ整形、`internal/httpserver`のハンドラー検証ロジックをfake store（`experiments.Store`インターフェース）でテスト。DB は不要）
+  - リポジトリ層のSQLテスト: `TEST_DATABASE_URL=... go test -tags=integration ./...`（`experiments.Repository`／`projects.Repository`の SQL を実 Postgres に当てて検証。**fake store では絶対に検知できない種類の退行** —— `and user_id = $2`が消える、`on delete cascade`が効かなくなる、`on conflict do nothing`の競合対策が壊れる —— を拾うためのもの。ビルドタグで分けてあるので、タグ無しの`go test ./...`は DB 無しで通ります。スキーマは`cmd/migrate`と同じ goose 経路で作るので、本番と同じ DDL に当たります）
   - Lint/フォーマット: [golangci-lint](https://golangci-lint.run/)（`.golangci.yml`）。`golangci-lint run ./...`でlint、`golangci-lint fmt ./...`でフォーマット（`--diff`で差分確認のみ）
 - Python Worker: `cd backend/worker && pip install -r requirements-dev.txt`
   - テスト: `pytest`（`tests/test_linear_regression.py`が解析ロジック、`tests/test_main.py`がHTTP層・エラーエンベロープをカバー。設定は`pytest.ini`）

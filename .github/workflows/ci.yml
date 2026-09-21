@@ -29,6 +29,22 @@ jobs:
     defaults:
       run:
         working-directory: backend/api
+    # The repositories' SQL is only checked against a real Postgres
+    # (KAN-31): a fake store cannot notice a query that stopped filtering
+    # by owner. Plain postgres, not Supabase -- internal/pgtest creates the
+    # auth.users table the migrations reference.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -38,7 +54,13 @@ jobs:
       - run: echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
       - run: go build ./...
       - run: go vet ./...
+      # Without the tag too, so the no-database path stays working: a
+      # contributor with no Postgres has to be able to run go test ./...
       - run: go test ./...
+      - run: go vet -tags=integration ./...
+      - run: go test -tags=integration ./...
+        env:
+          TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
       - run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
       - run: golangci-lint run ./...
       - run: golangci-lint fmt --diff ./...
