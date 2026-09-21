@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { callGoApi } from "@/lib/api";
+import { apiBaseUrl } from "@/lib/env";
 import {
   groupExperimentsByProject,
   type ExperimentSummary,
@@ -17,9 +18,8 @@ type HealthResult =
   { ok: true; status: number; body: string } | { ok: false; error: string };
 
 async function checkApiHealth(): Promise<HealthResult> {
-  const apiBaseUrl = process.env.API_INTERNAL_URL ?? "http://localhost:8080";
   try {
-    const res = await fetch(`${apiBaseUrl}/healthz`, { cache: "no-store" });
+    const res = await fetch(`${apiBaseUrl()}/healthz`, { cache: "no-store" });
     return res.ok
       ? { ok: true, status: res.status, body: await res.text() }
       : { ok: false, error: `HTTP ${res.status}: ${await res.text()}` };

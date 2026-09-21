@@ -1,3 +1,4 @@
+import { apiBaseUrl } from "@/lib/env";
 import { createClient } from "@/lib/supabase/server";
 
 // Mirrors the Go API's {data, error, meta} envelope (PDR.md section 8).
@@ -37,8 +38,7 @@ export async function callGoApi<T>(
     return null;
   }
 
-  const apiBaseUrl = process.env.API_INTERNAL_URL ?? "http://localhost:8080";
-  const res = await fetch(`${apiBaseUrl}${path}`, {
+  const res = await fetch(`${apiBaseUrl()}${path}`, {
     ...init,
     headers: {
       "Content-Type": "application/json",

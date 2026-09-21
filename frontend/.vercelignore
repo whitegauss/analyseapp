@@ -1,0 +1,7 @@
+# Vercel builds this directory; nothing here is needed at build time except
+# the app itself. The test suite in particular pulls in ../shared, which
+# lives outside the project root.
+**/*.test.ts
+**/*.test.tsx
+vitest.config.mts
+Dockerfile

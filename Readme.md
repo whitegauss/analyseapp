@@ -54,6 +54,60 @@ docker compose up --build
 docker compose down
 ```
 
+## デプロイ（Vercel / Hobby プラン）
+
+フロントエンドを Vercel に載せる前提の手順。**Vercel に載るのは Next.js だけ**で、Go API・Python Worker・Redis は別のホストが要る（下記「残りの3サービス」参照）。
+
+### Vercel 側の設定
+
+| 項目 | 値 |
+| --- | --- |
+| Root Directory | `frontend` |
+| Framework Preset | Next.js（自動検出） |
+| Build / Install | 既定のまま（`vercel.json` 以外に上書き不要） |
+
+環境変数は3つ。**`NEXT_PUBLIC_*` はビルド時にバンドルへ埋め込まれる**ので、Production だけでなく Preview にも設定しておくこと。
+
+| 変数 | 値 | 備考 |
+| --- | --- | --- |
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase の Project URL | ブラウザに露出する |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase の anon public key | ブラウザに露出する |
+| `API_INTERNAL_URL` | Go API の**公開 HTTPS URL** | ローカルと違い `http://api:8080` のような私設アドレスは使えない |
+
+未設定のまま動かすと `lib/env.ts` が変数名を名指しで落とす。以前は `?? "http://localhost:8080"` に落ちていて、「Go API が落ちている」ように見えるだけで原因が分からなかった。
+
+### 実行リージョン
+
+`frontend/vercel.json` で `hnd1`（東京）を指定している。**Hobby は1リージョンのみ**で、既定は `iad1`（ワシントン D.C.）。
+
+**合わせる先は利用者の居場所ではなく Supabase と Go API の場所。** 関数は1リクエストで Supabase Auth と Go API に何度も往復するので、そこが遠いと往復ぶんだけ遅くなる（静的ファイルは世界中の PoP から配られるのでこの設定とは無関係）。Supabase を東京以外に置いているなら `vercel.json` の値もそちらに変えること（[リージョン一覧](https://vercel.com/docs/regions#region-list)。大阪は `kix1`）。
+
+### `output: "standalone"` を Vercel では切っている
+
+`next.config.ts` が `process.env.VERCEL` を見て切り替える。standalone は Docker イメージ用（`frontend/Dockerfile` が `.next/standalone` を使う）で、Vercel は自前の Next.js アダプタを使うため不要。
+
+**Next 16.3.0 では、これが付いたままだとビルドが落ちる。** Vercel の `onBuildComplete` が `.next/next-server.js.nft.json` を探すが、standalone モードではもう出力されない（[vercel/next.js#96646](https://github.com/vercel/next.js/issues/96646)）。**ローカルの `next build` は通る**ので手元では気付けない。
+
+### 残りの3サービス
+
+`docker-compose.yml` の4サービスのうち、Vercel に載るのは `frontend` だけ。
+
+| サービス | 状況 |
+| --- | --- |
+| Go API | **要・別ホスト**。ブラウザからは直接呼ばれない（Server Component / Server Action 経由のみ）が、Vercel からは公開 HTTPS で届く必要がある。JWT 必須・レート制限・セキュリティヘッダーは実装済み |
+| Python Worker | **要・別ホスト**。Go API からのみ呼ばれる |
+| Redis | **任意**。解析結果のキャッシュ専用で、到達できなくてもキャッシュ無しで動作する（`lib/cache`）。最初は無しで出して構わない |
+| Postgres | 不要。Supabase を使っているので既に外部 |
+
+Vercel 自身にも Go・Python(FastAPI) の公式ランタイムと、`Dockerfile.vercel` による OCI イメージ実行があるので、3つとも Vercel に寄せる選択肢もある。どこに置くかは未決（KAN-32）。
+
+### Hobby プランの制約
+
+- **非商用のみ。** 業務・収益目的の利用は Pro 以上が要る
+- 関数: メモリ 2GB / 1 vCPU、最大実行時間 300 秒、リクエスト/レスポンス本文 4.5MB
+- Fast Data Transfer 100GB/月、1日あたり 100 デプロイ
+- 関数は production で2週間、preview で48時間アクセスが無いとアーカイブされ、次の呼び出しでコールドスタートが1秒以上延びる
+
 ## テスト / Lint / CI
 
 `main`へのpush・PRで [.github/workflows/ci.yml](./.github/workflows/ci.yml) がフロントエンド/Go API/Python Workerを並列でlint・フォーマットチェック・テスト・ビルドします。
