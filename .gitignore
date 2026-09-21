@@ -22,3 +22,6 @@ coverage/
 .coverage
 .pytest_cache/
 *.coverprofile
+
+# Agent-authored skills kept locally (Antigravity's PR review workflow)
+.agents/
