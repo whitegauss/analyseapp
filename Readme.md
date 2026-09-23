@@ -17,7 +17,7 @@
 
 ## 技術スタック
 - **API Gateway/BFF**: Go（[go-chi](https://github.com/go-chi/chi) + [zerolog](https://github.com/rs/zerolog)）
-- **解析ワーカー**: Python（FastAPI + structlog + numpy、将来的にgRPC常駐プロセス化を予定）
+- **解析ワーカー**: Python（FastAPI + structlog + numpy + SciPy、将来的にgRPC常駐プロセス化を予定）
 - **キャッシュ**: Redis（[go-redis](https://github.com/redis/go-redis)）。解析結果を`analysis:{experiment_id}:{type}:{params_hash}`キーで24hキャッシュ（PDR.md §7）
 - **DB/認証**: Supabase（PostgreSQL / Auth）。Go APIが `DATABASE_URL` で直接Postgresに接続する唯一の経路（[pgx](https://github.com/jackc/pgx)）。認証はSupabase AuthのJWT（JWKS/ES256）をGo APIが検証（[golang-jwt](https://github.com/golang-jwt/jwt) + [keyfunc](https://github.com/MicahParks/keyfunc)）
 - **フロントエンド**: Next.js 16（App Router）/ React 19 / TypeScript 5 / Tailwind CSS v4 / ESLint 9（`@/` エイリアス構成）。認証は [@supabase/ssr](https://github.com/supabase/ssr) でCookieベースのセッション管理（Server Actions + `proxy.ts`でのセッションリフレッシュ）。グラフ描画は [Plotly.js](https://plotly.com/javascript/)（PDR.md §6）。軸ラベルの数式表示は [KaTeX](https://katex.org/)
@@ -216,6 +216,24 @@ curl -X POST http://localhost:8001/analyze \
 - `y_error`カラムを渡すと逆分散重み付き回帰になります（外れ値の影響を誤差の大きさに応じて弱める）
 - `params`に`x_log`/`y_log`（真偽値）を渡すとlog10(x)・log10(y)に対してフィットします（片対数・両対数）。非正の値を持つデータ点はフィットから除外（ログを取れないため）、`y_log`時の重み付けは誤差伝播（σ_log10(y) ≈ σ_y / (y・ln10)）で近似。有効な点が2点未満なら`insufficient_data`エラー
 - 未対応の`type`やカラム欠如・長さ不一致・（対数フィットで）データ不足は`400`＋エンベロープ形式のエラーで返ります
+
+**`curve_fit`（任意の理論式の非線形フィット）**: `params.formula`に`y = ...`の右辺を書くと、`x`以外の変数をすべてパラメータとして最小二乗で求めます（SciPy の`curve_fit`）。式の文法は誤差伝播ツールと共通（`^`はべき乗、`pi`・`e`は定数）。
+
+```bash
+curl -X POST http://localhost:8001/analyze \
+  -H "Content-Type: application/json" \
+  -d '{
+    "type": "curve_fit",
+    "data": {"columns": {"x": [0,1,2,3,4], "y": [3.5,1.9,1.1,0.7,0.6]}},
+    "params": {"formula": "A*exp(-x/tau) + C", "initial": {"tau": 1}}
+  }'
+```
+
+- 結果は`parameters`（`[{name, value, stderr}]`、式中の初出順）・`r_squared`・`predicted_y`・`residuals`・`weighted`
+- `params.initial`で初期値を指定（省略したパラメータは`1.0`から開始）。非線形フィットは開始点の近くの解しか見つけないので、`A*sin(w*x)`のような式では初期値が結果を左右します
+- `y_error`カラムがあれば重み付き（線形回帰と同じく相対的な重みとして扱い、標準誤差は実際のばらつきから見積もる）
+- `stderr`が`null`になるのは、点の数とパラメータ数が同じとき（ばらつきが無い）と、データから切り分けられないパラメータがあるとき（`a*b*x`の`a`と`b`など）
+- エラーは`400`: 式の構文エラー・`y`を含む・パラメータが無い（`invalid_formula`、構文エラーは何文字目かを含む）、`formula`欠如・`initial`の不正（`invalid_params`）、点がパラメータ数より少ない（`insufficient_data`）、収束しない・初期値や結果で式が計算できない（`fit_failed`）
 - 新しい解析タイプを追加する場合は `backend/worker/app/analysis/` に新規ファイルを作り `@register("タイプ名")` を付けるだけで良い構造（`app/analysis/linear_regression.py`参照）
 
 ## ログイン画面
