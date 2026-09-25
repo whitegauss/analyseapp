@@ -14,34 +14,9 @@ from typing import Any
 
 import numpy as np
 
-from app.analysis import (
-    DegenerateInputError,
-    InsufficientDataError,
-    MissingColumnError,
-    register,
-)
+from app.analysis import DegenerateInputError, InsufficientDataError, register
+from app.analysis.common import r_squared, read_xy
 from app.schemas import DataSeries
-
-
-def _require_column(data: DataSeries, name: str) -> list[float]:
-    """Extract a required column from the data series, raising an error if missing."""
-    values = data.columns.get(name)
-    if values is None:
-        raise MissingColumnError(name)
-    return values
-
-
-def _require_finite(name: str, values: np.ndarray) -> None:
-    """Reject NaN/inf in a column.
-
-    numpy does not raise on these: they flow into the least-squares matrices
-    and come back either as a bare LinAlgError ("SVD did not converge"),
-    which is not an AnalysisError and so escapes the envelope as a 500, or --
-    for y -- as a result full of NaN that only fails later, when the response
-    cannot be serialised to JSON (KAN-57).
-    """
-    if not np.isfinite(values).all():
-        raise DegenerateInputError(f"column '{name}' must contain only finite numbers")
 
 
 @register("linear_regression")
@@ -53,30 +28,10 @@ def linear_regression(data: DataSeries, params: dict[str, Any]) -> dict[str, Any
     performs inverse-variance weighted regression. Returns the fitted parameters,
     their standard errors, R-squared, predicted values, and residuals.
     """
-    x = np.array(_require_column(data, "x"), dtype=float)
-    y = np.array(_require_column(data, "y"), dtype=float)
-
-    y_error_col = data.columns.get("y_error")
-    y_error = np.array(y_error_col, dtype=float) if y_error_col is not None else None
-
     # Validated before the log filter below, which compares with `> 0` and so
     # would silently drop a NaN as if it were a non-positive point rather than
     # report it.
-    _require_finite("x", x)
-    _require_finite("y", y)
-    if y_error is not None:
-        _require_finite("y_error", y_error)
-        # A measurement's standard deviation cannot be zero or negative. Zero
-        # becomes an infinite weight and takes the fit down with it; a
-        # negative one passed silently, because the sign cancels in the
-        # least-squares solution -- so a flipped sign or a mis-picked column
-        # produced a plausible-looking answer from meaningless input
-        # (KAN-60).
-        if not (y_error > 0).all():
-            raise DegenerateInputError(
-                "column 'y_error' must be strictly positive; "
-                "an uncertainty of zero or less is not a measurement error"
-            )
+    x, y, y_error = read_xy(data)
 
     x_log = bool(params.get("x_log", False))
     y_log = bool(params.get("y_log", False))
@@ -147,34 +102,13 @@ def linear_regression(data: DataSeries, params: dict[str, Any]) -> dict[str, Any
 
     predicted = slope * x_fit + intercept
     residuals = y_fit - predicted
-    ss_res = float(np.sum(residuals**2))
-    ss_tot = float(np.sum((y_fit - np.mean(y_fit)) ** 2))
-    # Three cases, spelled out rather than written as a single
-    # `if ss_tot > 0 else 1.0`. That form tests a negation: a NaN ss_tot
-    # (a NaN or inf reached y, and numpy propagates it here rather than
-    # raising) fails `> 0` just like a zero one does, so it took the
-    # else branch and reported a perfect fit for garbage (KAN-58).
-    if np.isnan(ss_tot):
-        # The fit itself is non-finite; slope and the residuals are already
-        # NaN, and R-squared is no more knowable than they are.
-        r_squared = float("nan")
-    elif ss_tot > 0:
-        # An ss_tot of inf lands here: the y values are so spread out that
-        # their squares overflow. Then ss_res is either inf too (giving NaN,
-        # which is honest) or small enough to be finite, which for a spread
-        # that large means the points really are on the line -- 1.0.
-        r_squared = 1.0 - ss_res / ss_tot
-    else:
-        # ss_tot == 0: every y is the same value, so the fit is the
-        # horizontal line through all of them and the residuals are zero.
-        r_squared = 1.0
 
     return {
         "slope": float(slope),
         "intercept": float(intercept),
         "slope_stderr": slope_stderr,
         "intercept_stderr": intercept_stderr,
-        "r_squared": r_squared,
+        "r_squared": r_squared(y_fit, predicted),
         "predicted_y": predicted.tolist(),
         "residuals": residuals.tolist(),
         "weighted": weights is not None,

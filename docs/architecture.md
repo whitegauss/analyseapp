@@ -80,7 +80,7 @@ Recoverer → logging → metrics → securityHeaders → ClientIPFromRemoteAddr
 
 FastAPI の**同期 HTTP サービス**。キューでもワーカープールでもない。
 
-解析タイプは `app/analysis/` のレジストリで引く。新しい解析を足すときは、ファイルを作って `@register("タイプ名")` を付けるだけ。`app/analysis/linear_regression.py` が唯一の実例。
+解析タイプは `app/analysis/` のレジストリで引く。新しい解析を足すときは、ファイルを作って `@register("タイプ名")` を付けるだけ。実例は `app/analysis/linear_regression.py` と `app/analysis/curve_fit.py`。入力列の検証と R² は `app/analysis/common.py` で共有している。
 
 **描画はしない。** 数値だけを返し、グラフはクライアントごとに描く（PDR §6）。
 

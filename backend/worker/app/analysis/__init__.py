@@ -62,6 +62,29 @@ class DegenerateInputError(AnalysisError):
     code = "degenerate_input"
 
 
+class InvalidParamsError(AnalysisError):
+    """`params` is missing something the analysis needs, or has it in the
+    wrong shape -- a problem with the request rather than with the data."""
+
+    code = "invalid_params"
+
+
+class InvalidFormulaError(AnalysisError):
+    """A hand-typed model formula that does not parse, or that parses but
+    cannot be fitted as written (nothing to fit, or it names `y`)."""
+
+    code = "invalid_formula"
+
+
+class FitFailedError(AnalysisError):
+    """The iterative fit did not reach a usable answer: it ran out of
+    iterations, or ended somewhere the model is not finite. The request was
+    valid -- a different starting point or model may well succeed -- so this
+    is an analysis result to show the user, not a server fault."""
+
+    code = "fit_failed"
+
+
 def run(type_: str, data: DataSeries, params: dict[str, Any]) -> dict[str, Any]:
     """Look up and execute the analysis function for the given type.
 
@@ -75,4 +98,4 @@ def run(type_: str, data: DataSeries, params: dict[str, Any]) -> dict[str, Any]:
 
 
 # Import submodules so their @register decorators run.
-from app.analysis import linear_regression  # noqa: E402,F401
+from app.analysis import curve_fit, linear_regression  # noqa: E402,F401

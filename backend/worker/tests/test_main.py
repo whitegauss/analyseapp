@@ -179,3 +179,35 @@ def test_analyze_single_point_with_log_still_explains_the_filter():
     # Here the log filter really is why a point went missing, and saying so
     # is the useful part of the old wording.
     assert "log-scale fit" in body["error"]["message"]
+
+
+def test_analyze_curve_fit_success():
+    res = client.post(
+        "/analyze",
+        json={
+            "type": "curve_fit",
+            "data": {"columns": {"x": [0, 1, 2, 3, 4], "y": [1, 3, 9, 19, 33]}},
+            "params": {"formula": "a*x^2 + b"},
+        },
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["error"] is None
+    assert body["data"]["type"] == "curve_fit"
+    params = {p["name"]: p["value"] for p in body["data"]["result"]["parameters"]}
+    assert params == {"a": pytest.approx(2.0), "b": pytest.approx(1.0)}
+
+
+def test_analyze_curve_fit_failure_is_400_envelope_not_500():
+    res = client.post(
+        "/analyze",
+        json={
+            "type": "curve_fit",
+            "data": {"columns": {"x": [1, 2, 3], "y": [1, 2, 3]}},
+            "params": {"formula": "1/(x - a)"},
+        },
+    )
+    assert res.status_code == 400
+    body = res.json()
+    assert body["data"] is None
+    assert body["error"]["code"] == "fit_failed"
