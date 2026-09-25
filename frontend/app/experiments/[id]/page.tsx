@@ -1,9 +1,11 @@
 import { notFound, redirect } from "next/navigation";
 import { callGoApi, GoApiError } from "@/lib/api";
 import { readAxisLabel } from "@/lib/experiment";
-import { fetchRegression } from "@/app/experiments/actions";
+import { readFitConfig } from "@/lib/fit";
+import { fetchCurveFit, fetchRegression } from "@/app/experiments/actions";
 import ExperimentChart from "@/components/ExperimentChart";
 import AxisLabelEditor from "@/components/AxisLabelEditor";
+import FitEditor from "@/components/FitEditor";
 import RawDataEditor from "@/components/RawDataEditor";
 import ExperimentProjectActions from "@/components/ExperimentProjectActions";
 import CenteredCard from "@/components/CenteredCard";
@@ -49,10 +51,14 @@ export default async function ExperimentPage({
     () => null,
   );
 
-  // Only the default linear-scale fit is computed up front; the log-scale
-  // variants (x/y/log-log) are fetched on demand from the client when the
-  // user actually switches the chart to a log axis (see ExperimentChart).
-  const regression = await fetchRegression(id, {});
+  // A saved formula replaces the straight line (KAN-29); only one fit is
+  // shown at a time. Otherwise only the default linear-scale fit is
+  // computed up front; the log-scale variants (x/y/log-log) are fetched on
+  // demand from the client when the user actually switches the chart to a
+  // log axis (see ExperimentChart).
+  const fit = readFitConfig(experiment.config);
+  const curveFit = fit ? await fetchCurveFit(id, fit) : null;
+  const regression = fit ? null : await fetchRegression(id, {});
 
   return (
     <CenteredCard maxWidth="max-w-3xl">
@@ -66,6 +72,7 @@ export default async function ExperimentPage({
         yAxisLabel={readAxisLabel(experiment.config, "y_axis_label")}
         experimentId={experiment.id}
         initialRegression={regression}
+        curveFit={curveFit}
       />
       <div className="flex flex-wrap items-start gap-3">
         <AxisLabelEditor
@@ -73,6 +80,7 @@ export default async function ExperimentPage({
           xAxisLabel={readAxisLabel(experiment.config, "x_axis_label")}
           yAxisLabel={readAxisLabel(experiment.config, "y_axis_label")}
         />
+        <FitEditor id={experiment.id} fit={fit} />
         <RawDataEditor
           id={experiment.id}
           columns={experiment.raw_data.columns}

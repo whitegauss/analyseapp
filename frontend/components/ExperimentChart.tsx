@@ -15,12 +15,17 @@ import {
   uncertaintyBoundsAt,
   UNKNOWN_UNCERTAINTY_TEXT,
 } from "@/lib/chart/regression";
+import {
+  formatCurveLegend,
+  formatFitParameter,
+  sampleCurve,
+} from "@/lib/chart/curveFit";
 import { fetchRegression } from "@/app/experiments/actions";
 import {
   formatUncertainty,
   roundToUncertainty,
 } from "@/lib/significantFigures";
-import type { LinearRegressionResult } from "@/lib/experiment";
+import type { CurveFitOutcome, LinearRegressionResult } from "@/lib/experiment";
 
 // plotly.js touches `window`, so it can only load in the browser. While the
 // library itself is being fetched, show the same skeleton used for "no data
@@ -42,6 +47,9 @@ type Props = {
   // by the page. Log-scale variants are fetched lazily, only if the user
   // actually switches a checkbox on.
   initialRegression?: LinearRegressionResult | null;
+  // The saved formula's fit, when the experiment has one (KAN-29). Drawn in
+  // place of the straight line; the page fetches one or the other.
+  curveFit?: CurveFitOutcome | null;
 };
 
 export default function ExperimentChart({
@@ -51,6 +59,7 @@ export default function ExperimentChart({
   yAxisLabel = "",
   experimentId,
   initialRegression = null,
+  curveFit = null,
 }: Props) {
   const [showRegression, setShowRegression] = useState(true);
   const [legendFontSize, setLegendFontSize] = useState(12);
@@ -121,6 +130,9 @@ export default function ExperimentChart({
   async function ensureRegressionFor(xLog: boolean, yLog: boolean) {
     if (!xLog && !yLog) return;
     if (!experimentId) return;
+    // A curve fit is done once on the raw values; a log axis only changes
+    // how it is drawn, so there is nothing to re-fetch.
+    if (curveFit) return;
     const key = regressionCacheKey(xLog, yLog);
     if (key in logRegressionCache) return;
     setPendingLogFetch(true);
@@ -160,6 +172,26 @@ export default function ExperimentChart({
       line: { color: "#ef4444" },
     };
   }, [activeRegression, showRegression, lineXBounds, xLogScale, yLogScale]);
+
+  // Sampled rather than drawn from two endpoints, and across the same
+  // edge-to-edge bounds as the straight line.
+  const curveTrace: Partial<Data> | null = useMemo(() => {
+    if (!curveFit?.result || !showRegression || !lineXBounds) return null;
+    const { x: cx, y: cy } = sampleCurve(
+      curveFit.formula,
+      curveFit.result.parameters,
+      lineXBounds,
+      xLogScale,
+    );
+    return {
+      x: cx,
+      y: cy,
+      type: "scatter",
+      mode: "lines",
+      name: formatCurveLegend(curveFit.formula),
+      line: { color: "#ef4444" },
+    };
+  }, [curveFit, showRegression, lineXBounds, xLogScale]);
 
   // A ±1σ uncertainty band around the fit line. The worker doesn't expose
   // the slope/intercept covariance, so this isn't a statistically rigorous
@@ -212,6 +244,7 @@ export default function ExperimentChart({
               ...(regressionBand ?? []),
               trace,
               ...(regressionTrace ? [regressionTrace] : []),
+              ...(curveTrace ? [curveTrace] : []),
             ]}
             layout={{
               title: { text: title },
@@ -301,6 +334,41 @@ export default function ExperimentChart({
           Y軸を対数表示
         </label>
       </div>
+
+      {curveFit && (
+        <div className="flex flex-col items-center gap-1 text-sm text-zinc-600 dark:text-zinc-400">
+          {curveFit.result ? (
+            <>
+              <label className="flex items-center gap-1.5">
+                <input
+                  type="checkbox"
+                  checked={showRegression}
+                  onChange={(e) => setShowRegression(e.target.checked)}
+                />
+                フィット曲線を表示
+              </label>
+              {showRegression && (
+                <>
+                  <p className="font-mono">y = {curveFit.formula}</p>
+                  <p>
+                    {curveFit.result.parameters
+                      .map((p) => formatFitParameter(p))
+                      .join("、")}
+                    {"　"}(R² = {curveFit.result.r_squared.toFixed(4)}
+                    {curveFit.result.weighted ? "、誤差重み付き" : ""})
+                  </p>
+                </>
+              )}
+            </>
+          ) : (
+            // Shown, not hidden: the user chose this formula, and the
+            // message (usually "set starting values") is how they fix it.
+            <p className="text-red-600 dark:text-red-400">
+              y = {curveFit.formula} のフィットに失敗しました: {curveFit.error}
+            </p>
+          )}
+        </div>
+      )}
 
       {initialRegression && (
         <div className="flex flex-col items-center gap-1 text-sm text-zinc-600 dark:text-zinc-400">

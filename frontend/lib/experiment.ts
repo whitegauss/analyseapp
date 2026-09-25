@@ -20,6 +20,31 @@ export type LinearRegressionResult = {
   y_log: boolean;
 };
 
+export type CurveFitParameter = {
+  name: string;
+  value: number;
+  /** null when the data cannot determine it: as many points as parameters,
+   * or parameters only their combination of which is fixed (a and b in
+   * a*b*x). */
+  stderr: number | null;
+};
+
+/** The worker's `curve_fit` result (backend/worker/app/analysis/curve_fit.py). */
+export type CurveFitResult = {
+  formula: string;
+  parameters: CurveFitParameter[];
+  r_squared: number;
+  weighted: boolean;
+};
+
+/** A saved experiment's curve fit, as the page hands it to the chart: the
+ * fit, or the reason it failed. A failure is shown rather than hidden --
+ * unlike the automatic straight line, the user chose this formula and needs
+ * to know what to change (usually the starting values). */
+export type CurveFitOutcome =
+  | { formula: string; result: CurveFitResult; error?: undefined }
+  | { formula: string; result?: undefined; error: string };
+
 /** Graph settings are stored as free-form JSON on the experiment row, so
  * nothing about their shape is guaranteed by the API. */
 export type ExperimentConfig = Record<string, unknown>;

@@ -2,8 +2,13 @@
 
 import { redirect } from "next/navigation";
 import { callGoApi, GoApiError } from "@/lib/api";
-import type { LinearRegressionResult } from "@/lib/experiment";
+import type {
+  CurveFitOutcome,
+  ExperimentConfig,
+  LinearRegressionResult,
+} from "@/lib/experiment";
 import { parseColumnsField } from "@/lib/experimentForm";
+import { mergeConfig, parseFitForm, type FitConfig } from "@/lib/fit";
 
 type Experiment = { id: string };
 
@@ -81,16 +86,64 @@ export async function updateAxisLabels(
   const id = String(formData.get("id") ?? "");
   if (!id) return { error: "実験IDが不正です" };
 
-  const config = {
+  return patchConfig(id, {
     x_axis_label: String(formData.get("xAxisLabel") ?? "").trim(),
     y_axis_label: String(formData.get("yAxisLabel") ?? "").trim(),
-  };
+  });
+}
+
+// Writes `patch` into the experiment's config, keeping every other key.
+// The API's PATCH /config replaces the config wholesale, so each editor
+// sending just its own keys would erase the others' -- saving the axis
+// labels used to be harmless only because they were all there was, and
+// would now drop the saved fit. Read-modify-write rather than a merge on
+// the server: one user editing their own experiment is the only writer.
+async function patchConfig(
+  id: string,
+  patch: Record<string, unknown>,
+): Promise<{ error: string }> {
+  let current: { config: ExperimentConfig } | null;
+  try {
+    current = await callGoApi<{ config: ExperimentConfig }>(
+      `/api/v1/experiments/${id}`,
+    );
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : String(e) };
+  }
+  if (!current) {
+    redirect("/login");
+  }
 
   return submitAndRedirect<Experiment>(
     `/api/v1/experiments/${id}/config`,
-    { method: "PATCH", body: JSON.stringify({ config }) },
+    {
+      method: "PATCH",
+      body: JSON.stringify({ config: mergeConfig(current.config, patch) }),
+    },
     () => `/experiments/${id}`,
   );
+}
+
+export type UpdateFitState = { error?: string };
+
+// Saves which model the experiment's chart fits (KAN-29). Straight line
+// removes the key, so an experiment that never had a curve fit and one that
+// went back to the line look the same.
+export async function updateFit(
+  _prevState: UpdateFitState,
+  formData: FormData,
+): Promise<UpdateFitState> {
+  const id = String(formData.get("id") ?? "");
+  if (!id) return { error: "実験IDが不正です" };
+
+  const parsed = parseFitForm(
+    formData.get("mode"),
+    formData.get("formula"),
+    formData.get("initial"),
+  );
+  if (!parsed.ok) return { error: parsed.error };
+
+  return patchConfig(id, { fit: parsed.fit ?? undefined });
 }
 
 export type UpdateRawDataState = { error?: string };
@@ -206,5 +259,35 @@ export async function fetchRegression(
     return res?.result ?? null;
   } catch {
     return null;
+  }
+}
+
+// Runs the saved curve fit. Unlike fetchRegression, a failure is returned
+// rather than swallowed: the straight line is drawn automatically and can
+// quietly go missing, but this formula is one the user typed, and a fit
+// that did not converge is something they can fix (usually with starting
+// values) only if they are told. No session still resolves to null.
+export async function fetchCurveFit(
+  id: string,
+  fit: FitConfig,
+): Promise<CurveFitOutcome | null> {
+  try {
+    const res = await callGoApi<{
+      type: string;
+      result: NonNullable<CurveFitOutcome["result"]>;
+    }>(`/api/v1/experiments/${id}/analyze`, {
+      method: "POST",
+      body: JSON.stringify({
+        type: "curve_fit",
+        params: { formula: fit.formula, initial: fit.initial },
+      }),
+    });
+    if (!res) return null;
+    return { formula: fit.formula, result: res.result };
+  } catch (e) {
+    return {
+      formula: fit.formula,
+      error: e instanceof Error ? e.message : String(e),
+    };
   }
 }
