@@ -106,6 +106,23 @@ Python Workerは`WORKER_PYTHON`、`backend/worker/.venv/bin/python`、`python3`�
   - テスト: `pytest`（`tests/test_linear_regression.py`が解析ロジック、`tests/test_main.py`がHTTP層・エラーエンベロープをカバー。設定は`pytest.ini`）
   - Lint/フォーマット: [Ruff](https://docs.astral.sh/ruff/)（`ruff.toml`）。`ruff check .`でlint、`ruff format .`でフォーマット（`--check`で差分確認のみ）
 
+## デプロイ
+
+デプロイ先は VPS 上の k3s（PDR §4）。現時点で出来ているのは **GHCR へのイメージ push まで**で、VPS・マニフェスト・ArgoCD は未着手（KAN-32）。
+
+CI の`images`ジョブが3イメージをビルドします。PR ではビルドだけ（Dockerfile の破損検知）、`main`では3つのテストジョブが通った後に push します。
+
+| イメージ | 中身 |
+| --- | --- |
+| `ghcr.io/whitegauss/analyseapp-api:<commit SHA>` | Go API。マイグレーション用の`migrate`バイナリも同梱（`entrypoint: migrate`で使う） |
+| `ghcr.io/whitegauss/analyseapp-worker:<commit SHA>` | Python Worker |
+| `ghcr.io/whitegauss/analyseapp-frontend:<commit SHA>` | Next.js（standalone） |
+
+タグは commit SHA のみで`latest`は付けません。
+
+- **`NEXT_PUBLIC_SUPABASE_URL`/`NEXT_PUBLIC_SUPABASE_ANON_KEY`はビルド時にブラウザ向けバンドルへ埋め込まれる**ため、実行時の環境変数では差し替えられません。GitHub の Settings → Secrets and variables → Actions → **Variables**（公開される値なので Secret ではない）に登録してください。未登録のまま`main`に push すると frontend のジョブが変数名を出して落ちます（空の値を焼いた壊れたイメージを push しないため）
+- GHCR のパッケージは初回 push 時に **private** で作られます。k3s から pull するには imagePullSecret を置くか、パッケージを public にする必要があります
+
 ## API（experiments）
 
 Go API GatewayのAPI構成は [backend/api/openapi.yaml](./backend/api/openapi.yaml)（OpenAPI 3.0 / Swagger）にまとめています。[Swagger Editor](https://editor.swagger.io/) 等に貼り付けると一覧・スキーマを確認できます。
