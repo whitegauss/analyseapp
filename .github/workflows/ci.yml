@@ -5,6 +5,10 @@ on:
     branches: [main]
   pull_request:
 
+# Read-only unless a job asks for more; only publish-images does.
+permissions:
+  contents: read
+
 jobs:
   frontend:
     runs-on: ubuntu-latest
@@ -81,3 +85,97 @@ jobs:
       - run: ruff check .
       - run: ruff format --check .
       - run: pytest
+
+  # Image build and image publish are separate jobs (KAN-32):
+  #
+  # - images builds all three on every run, so a broken Dockerfile shows up
+  #   on the PR. It has read-only permissions: a same-repo PR runs with
+  #   this job's token, and a PR that edits this file could otherwise use a
+  #   packages:write token without ever reaching the push step.
+  # - publish-images pushes, only from main and only once every build has
+  #   passed. A matrix job that pushed per leg left the others' images in
+  #   GHCR when one leg failed -- a SHA with two of its three images.
+  #
+  # publish-images rebuilds from the gha cache the build job just wrote,
+  # which is cheap, rather than passing multi-hundred-MB image tarballs
+  # between jobs as artifacts.
+  #
+  # Tagged by commit SHA only; the deployment pins a SHA, so there is no
+  # "latest" to drift.
+  images:
+    needs: [frontend, api, worker]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        include:
+          - name: api
+            context: backend/api
+          - name: worker
+            context: backend/worker
+          - name: frontend
+            context: frontend
+    steps:
+      - uses: actions/checkout@v4
+      # NEXT_PUBLIC_* are inlined into the browser bundle at build time, so
+      # an image built without them is silently broken rather than failing
+      # at startup. They are public values, hence repository variables
+      # rather than secrets. Checked here rather than in publish-images so
+      # a missing one stops the publish of all three, not just frontend's.
+      # A PR build only checks the Dockerfile, so it may go without them.
+      - if: matrix.name == 'frontend' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ vars.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+        run: |
+          missing=0
+          [ -n "$SUPABASE_URL" ] || { echo "::error::repository variable NEXT_PUBLIC_SUPABASE_URL is not set"; missing=1; }
+          [ -n "$SUPABASE_ANON_KEY" ] || { echo "::error::repository variable NEXT_PUBLIC_SUPABASE_ANON_KEY is not set"; missing=1; }
+          exit "$missing"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          push: false
+          build-args: |
+            NEXT_PUBLIC_SUPABASE_URL=${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
+            NEXT_PUBLIC_SUPABASE_ANON_KEY=${{ vars.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+  publish-images:
+    needs: [images]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - name: api
+            context: backend/api
+          - name: worker
+            context: backend/worker
+          - name: frontend
+            context: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # Same context and build args as the images job, so every layer comes
+      # from its cache.
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          push: true
+          tags: ghcr.io/whitegauss/analyseapp-${{ matrix.name }}:${{ github.sha }}
+          build-args: |
+            NEXT_PUBLIC_SUPABASE_URL=${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
+            NEXT_PUBLIC_SUPABASE_ANON_KEY=${{ vars.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          cache-from: type=gha,scope=${{ matrix.name }}
