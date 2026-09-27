@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
@@ -19,48 +18,6 @@ import (
 	"analyseapp/api/internal/experiments"
 	"analyseapp/api/internal/worker"
 )
-
-// fakeWorkerClient is a minimal worker.Client implementation for handler
-// tests, so handler logic is testable without a running Python worker.
-type fakeWorkerClient struct {
-	t         *testing.T
-	analyzeFn func(ctx context.Context, traceID string, body []byte) (int, []byte, error)
-}
-
-func (f *fakeWorkerClient) Analyze(ctx context.Context, traceID string, body []byte) (int, []byte, error) {
-	if f.analyzeFn == nil {
-		f.t.Fatal("unexpected call to Analyze")
-	}
-	return f.analyzeFn(ctx, traceID, body)
-}
-
-// fakeCache is an in-memory cache.Cache implementation for handler tests.
-type fakeCache struct {
-	store map[string][]byte
-}
-
-func newFakeCache() *fakeCache {
-	return &fakeCache{store: map[string][]byte{}}
-}
-
-func (c *fakeCache) Get(ctx context.Context, key string) ([]byte, bool, error) {
-	v, ok := c.store[key]
-	return v, ok, nil
-}
-
-func (c *fakeCache) Set(ctx context.Context, key string, value []byte, ttl time.Duration) error {
-	c.store[key] = value
-	return nil
-}
-
-func (c *fakeCache) DeleteByPrefix(ctx context.Context, prefix string) error {
-	for key := range c.store {
-		if strings.HasPrefix(key, prefix) {
-			delete(c.store, key)
-		}
-	}
-	return nil
-}
 
 func TestHandleAnalyzeExperiment(t *testing.T) {
 	t.Run("unauthenticated", func(t *testing.T) {

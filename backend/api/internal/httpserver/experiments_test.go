@@ -11,129 +11,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
-	"analyseapp/api/internal/auth"
 	"analyseapp/api/internal/cache"
 	"analyseapp/api/internal/experiments"
 	"analyseapp/api/internal/projects"
-	"analyseapp/api/internal/response"
 )
-
-var testUserID = uuid.MustParse("11111111-1111-1111-1111-111111111111")
-
-// fakeStore is a minimal experiments.Store implementation for handler
-// tests, so handler validation/status-code logic is testable without a
-// database. Unset function fields fail the test if called.
-type fakeStore struct {
-	t               *testing.T
-	createFn        func(ctx context.Context, userID, projectID uuid.UUID, title *string, rawData, config map[string]any) (experiments.Experiment, error)
-	getByIDFn       func(ctx context.Context, id, userID uuid.UUID) (experiments.Experiment, error)
-	listByUserFn    func(ctx context.Context, userID uuid.UUID) ([]experiments.Experiment, error)
-	listByProjectFn func(ctx context.Context, projectID, userID uuid.UUID) ([]experiments.Experiment, error)
-	copyFn          func(ctx context.Context, id, userID, targetProjectID uuid.UUID) (experiments.Experiment, error)
-	updateProjectFn func(ctx context.Context, id, userID, targetProjectID uuid.UUID) (experiments.Experiment, error)
-	updateConfigFn  func(ctx context.Context, id, userID uuid.UUID, config map[string]any) (experiments.Experiment, error)
-	updateRawDataFn func(ctx context.Context, id, userID uuid.UUID, rawData map[string]any) (experiments.Experiment, error)
-	deleteFn        func(ctx context.Context, id, userID uuid.UUID) error
-}
-
-func (f *fakeStore) EnsureProfile(ctx context.Context, userID uuid.UUID) error {
-	return nil
-}
-
-func (f *fakeStore) Create(ctx context.Context, userID, projectID uuid.UUID, title *string, rawData, config map[string]any) (experiments.Experiment, error) {
-	if f.createFn == nil {
-		f.t.Fatal("unexpected call to Create")
-	}
-	return f.createFn(ctx, userID, projectID, title, rawData, config)
-}
-
-func (f *fakeStore) GetByID(ctx context.Context, id, userID uuid.UUID) (experiments.Experiment, error) {
-	if f.getByIDFn == nil {
-		f.t.Fatal("unexpected call to GetByID")
-	}
-	return f.getByIDFn(ctx, id, userID)
-}
-
-func (f *fakeStore) ListByUser(ctx context.Context, userID uuid.UUID) ([]experiments.Experiment, error) {
-	if f.listByUserFn == nil {
-		f.t.Fatal("unexpected call to ListByUser")
-	}
-	return f.listByUserFn(ctx, userID)
-}
-
-func (f *fakeStore) ListByProject(ctx context.Context, projectID, userID uuid.UUID) ([]experiments.Experiment, error) {
-	if f.listByProjectFn == nil {
-		f.t.Fatal("unexpected call to ListByProject")
-	}
-	return f.listByProjectFn(ctx, projectID, userID)
-}
-
-func (f *fakeStore) Copy(ctx context.Context, id, userID, targetProjectID uuid.UUID) (experiments.Experiment, error) {
-	if f.copyFn == nil {
-		f.t.Fatal("unexpected call to Copy")
-	}
-	return f.copyFn(ctx, id, userID, targetProjectID)
-}
-
-func (f *fakeStore) UpdateProject(ctx context.Context, id, userID, targetProjectID uuid.UUID) (experiments.Experiment, error) {
-	if f.updateProjectFn == nil {
-		f.t.Fatal("unexpected call to UpdateProject")
-	}
-	return f.updateProjectFn(ctx, id, userID, targetProjectID)
-}
-
-func (f *fakeStore) UpdateConfig(ctx context.Context, id, userID uuid.UUID, config map[string]any) (experiments.Experiment, error) {
-	if f.updateConfigFn == nil {
-		f.t.Fatal("unexpected call to UpdateConfig")
-	}
-	return f.updateConfigFn(ctx, id, userID, config)
-}
-
-func (f *fakeStore) UpdateRawData(ctx context.Context, id, userID uuid.UUID, rawData map[string]any) (experiments.Experiment, error) {
-	if f.updateRawDataFn == nil {
-		f.t.Fatal("unexpected call to UpdateRawData")
-	}
-	return f.updateRawDataFn(ctx, id, userID, rawData)
-}
-
-func (f *fakeStore) Delete(ctx context.Context, id, userID uuid.UUID) error {
-	if f.deleteFn == nil {
-		f.t.Fatal("unexpected call to Delete")
-	}
-	return f.deleteFn(ctx, id, userID)
-}
-
-// newTestRequest builds a request carrying a chi "id" URL param and,
-// optionally, an authenticated user in context (mirroring what auth.Middleware
-// would have set).
-func newTestRequest(method, id, body string, authenticated bool) *http.Request {
-	var r *http.Request
-	if body != "" {
-		r = httptest.NewRequest(method, "/", strings.NewReader(body))
-	} else {
-		r = httptest.NewRequest(method, "/", nil)
-	}
-
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("id", id)
-	ctx := context.WithValue(r.Context(), chi.RouteCtxKey, rctx)
-	if authenticated {
-		ctx = auth.WithUserID(ctx, testUserID)
-	}
-	return r.WithContext(ctx)
-}
-
-func decodeEnvelope(t *testing.T, rec *httptest.ResponseRecorder) response.Envelope {
-	t.Helper()
-	var body response.Envelope
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode body: %v (body=%s)", err, rec.Body.String())
-	}
-	return body
-}
 
 func TestHandleCreateExperiment(t *testing.T) {
 	t.Run("unauthenticated", func(t *testing.T) {
