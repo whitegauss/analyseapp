@@ -201,6 +201,9 @@ func (f *fakeWorkerClient) Analyze(ctx context.Context, traceID string, body []b
 // fakeCache is an in-memory cache.Cache implementation for handler tests.
 type fakeCache struct {
 	store map[string][]byte
+	// getErr / setErr, when set, make every Get / Set fail, the way an
+	// unreachable Redis does.
+	getErr, setErr error
 }
 
 func newFakeCache() *fakeCache {
@@ -208,11 +211,17 @@ func newFakeCache() *fakeCache {
 }
 
 func (c *fakeCache) Get(ctx context.Context, key string) ([]byte, bool, error) {
+	if c.getErr != nil {
+		return nil, false, c.getErr
+	}
 	v, ok := c.store[key]
 	return v, ok, nil
 }
 
 func (c *fakeCache) Set(ctx context.Context, key string, value []byte, ttl time.Duration) error {
+	if c.setErr != nil {
+		return c.setErr
+	}
 	c.store[key] = value
 	return nil
 }
