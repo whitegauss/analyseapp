@@ -16,6 +16,7 @@ import (
 	"analyseapp/api/internal/cache"
 	"analyseapp/api/internal/experiments"
 	"analyseapp/api/internal/projects"
+	"analyseapp/api/internal/response"
 )
 
 func TestHandleCreateExperiment(t *testing.T) {
@@ -904,426 +905,255 @@ func TestHandleMoveExperiment(t *testing.T) {
 	})
 }
 
+// newExperimentStore is the default store for the tables below: every
+// method fails the test if called.
+func newExperimentStore(t *testing.T) *fakeStore { return &fakeStore{t: t} }
+
 func TestHandleGetExperiment(t *testing.T) {
-	t.Run("unauthenticated", func(t *testing.T) {
-		store := &fakeStore{t: t}
-		req := newTestRequest("GET", uuid.New().String(), "", false)
-		rec := httptest.NewRecorder()
-
-		handleGetExperiment(store)(rec, req)
-
-		if rec.Code != http.StatusUnauthorized {
-			t.Errorf("status = %d, want 401", rec.Code)
+	id := uuid.New()
+	getByID := func(fn func(id, userID uuid.UUID) (experiments.Experiment, error)) func(t *testing.T) *fakeStore {
+		return func(t *testing.T) *fakeStore {
+			return &fakeStore{t: t, getByIDFn: func(_ context.Context, id, userID uuid.UUID) (experiments.Experiment, error) {
+				return fn(id, userID)
+			}}
 		}
-	})
+	}
 
-	t.Run("invalid id", func(t *testing.T) {
-		store := &fakeStore{t: t}
-		req := newTestRequest("GET", "not-a-uuid", "", true)
-		rec := httptest.NewRecorder()
-
-		handleGetExperiment(store)(rec, req)
-
-		if rec.Code != http.StatusBadRequest {
-			t.Errorf("status = %d, want 400", rec.Code)
-		}
-		if body := decodeEnvelope(t, rec); body.Error == nil || body.Error.Code != "invalid_id" {
-			t.Errorf("error code = %+v, want invalid_id", body.Error)
-		}
-	})
-
-	t.Run("not found", func(t *testing.T) {
-		store := &fakeStore{
-			t: t,
-			getByIDFn: func(ctx context.Context, id, userID uuid.UUID) (experiments.Experiment, error) {
+	runHandlerCases(t, "GET", []handlerCase[*fakeStore]{
+		{name: "unauthenticated", id: id.String(), unauthenticated: true,
+			wantStatus: http.StatusUnauthorized, wantCode: "unauthorized"},
+		{name: "invalid id", id: "not-a-uuid",
+			wantStatus: http.StatusBadRequest, wantCode: "invalid_id"},
+		{name: "success returns the stored experiment", id: id.String(),
+			store: func(t *testing.T) *fakeStore {
+				return getByID(func(gotID, userID uuid.UUID) (experiments.Experiment, error) {
+					wantStoreCall(t, gotID, id, userID)
+					return experiments.Experiment{ID: gotID, UserID: userID, Title: new("run 1")}, nil
+				})(t)
+			},
+			wantStatus: http.StatusOK,
+			check: func(t *testing.T, body response.Envelope) {
+				data, _ := body.Data.(map[string]any)
+				if data["id"] != id.String() || data["title"] != "run 1" {
+					t.Errorf("data = %+v, want the stored experiment", body.Data)
+				}
+			}},
+		{name: "not found", id: id.String(),
+			store: getByID(func(uuid.UUID, uuid.UUID) (experiments.Experiment, error) {
 				return experiments.Experiment{}, experiments.ErrNotFound
-			},
-		}
-		req := newTestRequest("GET", uuid.New().String(), "", true)
-		rec := httptest.NewRecorder()
-
-		handleGetExperiment(store)(rec, req)
-
-		if rec.Code != http.StatusNotFound {
-			t.Errorf("status = %d, want 404", rec.Code)
-		}
-	})
-
-	// Every other fake here returns the bare sentinel, which the mapping would
-	// recognize even compared with ==. This one adds context the way a real
-	// store reasonably might, so a regression from errors.Is back to == shows
-	// up as a 500 here instead of hiding until production (KAN-66).
-	t.Run("not found, wrapped by the store", func(t *testing.T) {
-		id := uuid.New()
-		store := &fakeStore{
-			t: t,
-			getByIDFn: func(ctx context.Context, gotID, userID uuid.UUID) (experiments.Experiment, error) {
+			}),
+			wantStatus: http.StatusNotFound, wantCode: "not_found"},
+		// Every other fake returns the bare sentinel, which the mapping would
+		// recognize even compared with ==. This one adds context the way a
+		// real store reasonably might, so a regression from errors.Is back to
+		// == shows up as a 500 here instead of hiding until production
+		// (KAN-66).
+		{name: "not found, wrapped by the store", id: id.String(),
+			store: getByID(func(gotID, _ uuid.UUID) (experiments.Experiment, error) {
 				return experiments.Experiment{}, fmt.Errorf("get experiment %s: %w", gotID, experiments.ErrNotFound)
-			},
-		}
-		req := newTestRequest("GET", id.String(), "", true)
-		rec := httptest.NewRecorder()
-
-		handleGetExperiment(store)(rec, req)
-
-		if rec.Code != http.StatusNotFound {
-			t.Errorf("status = %d, want 404", rec.Code)
-		}
-		if body := decodeEnvelope(t, rec); body.Error == nil || body.Error.Code != "not_found" {
-			t.Errorf("error = %+v, want not_found", body.Error)
-		}
-	})
-
-	t.Run("success", func(t *testing.T) {
-		id := uuid.New()
-		store := &fakeStore{
-			t: t,
-			getByIDFn: func(ctx context.Context, gotID, userID uuid.UUID) (experiments.Experiment, error) {
-				if gotID != id {
-					t.Errorf("id = %v, want %v", gotID, id)
-				}
-				if userID != testUserID {
-					t.Errorf("userID = %v, want %v", userID, testUserID)
-				}
-				return experiments.Experiment{ID: id, UserID: userID}, nil
-			},
-		}
-		req := newTestRequest("GET", id.String(), "", true)
-		rec := httptest.NewRecorder()
-
-		handleGetExperiment(store)(rec, req)
-
-		if rec.Code != http.StatusOK {
-			t.Errorf("status = %d, want 200 (body=%s)", rec.Code, rec.Body.String())
-		}
-	})
+			}),
+			wantStatus: http.StatusNotFound, wantCode: "not_found"},
+		{name: "store failure", id: id.String(),
+			store: getByID(func(uuid.UUID, uuid.UUID) (experiments.Experiment, error) {
+				return experiments.Experiment{}, errStoreDown
+			}),
+			wantStatus: http.StatusInternalServerError, wantCode: "internal_error"},
+	}, newExperimentStore, func(s *fakeStore) http.HandlerFunc { return handleGetExperiment(s) })
 }
 
 func TestHandleListExperiments(t *testing.T) {
-	t.Run("unauthenticated", func(t *testing.T) {
-		store := &fakeStore{t: t}
-		req := newTestRequest("GET", "", "", false)
-		rec := httptest.NewRecorder()
-
-		handleListExperiments(store)(rec, req)
-
-		if rec.Code != http.StatusUnauthorized {
-			t.Errorf("status = %d, want 401", rec.Code)
+	listByUser := func(n int) func(t *testing.T) *fakeStore {
+		return func(t *testing.T) *fakeStore {
+			return &fakeStore{t: t, listByUserFn: func(_ context.Context, userID uuid.UUID) ([]experiments.Experiment, error) {
+				if userID != testUserID {
+					t.Errorf("userID passed to store = %v, want the authenticated user %v", userID, testUserID)
+				}
+				list := []experiments.Experiment{}
+				for range n {
+					list = append(list, experiments.Experiment{ID: uuid.New(), UserID: userID})
+				}
+				return list, nil
+			}}
 		}
-	})
+	}
+	wantLen := func(n int) func(t *testing.T, body response.Envelope) {
+		return func(t *testing.T, body response.Envelope) {
+			if list, ok := body.Data.([]any); !ok || len(list) != n {
+				t.Errorf("data = %+v, want an array of %d", body.Data, n)
+			}
+		}
+	}
 
-	t.Run("empty list", func(t *testing.T) {
-		store := &fakeStore{
-			t: t,
-			listByUserFn: func(ctx context.Context, userID uuid.UUID) ([]experiments.Experiment, error) {
-				return []experiments.Experiment{}, nil
+	runHandlerCases(t, "GET", []handlerCase[*fakeStore]{
+		{name: "unauthenticated", unauthenticated: true,
+			wantStatus: http.StatusUnauthorized, wantCode: "unauthorized"},
+		{name: "success returns the user's experiments", store: listByUser(2),
+			wantStatus: http.StatusOK, check: wantLen(2)},
+		// An empty array, not null: the frontend calls .map() on this.
+		{name: "no experiments is an empty array", store: listByUser(0),
+			wantStatus: http.StatusOK, check: wantLen(0)},
+		{name: "store failure",
+			store: func(t *testing.T) *fakeStore {
+				return &fakeStore{t: t, listByUserFn: func(context.Context, uuid.UUID) ([]experiments.Experiment, error) {
+					return nil, errStoreDown
+				}}
 			},
-		}
-		req := newTestRequest("GET", "", "", true)
-		rec := httptest.NewRecorder()
-
-		handleListExperiments(store)(rec, req)
-
-		if rec.Code != http.StatusOK {
-			t.Errorf("status = %d, want 200 (body=%s)", rec.Code, rec.Body.String())
-		}
-		body := decodeEnvelope(t, rec)
-		list, ok := body.Data.([]any)
-		if !ok || len(list) != 0 {
-			t.Errorf("data = %+v, want an empty array", body.Data)
-		}
-	})
-
-	t.Run("success returns the user's experiments", func(t *testing.T) {
-		var gotUserID uuid.UUID
-		store := &fakeStore{
-			t: t,
-			listByUserFn: func(ctx context.Context, userID uuid.UUID) ([]experiments.Experiment, error) {
-				gotUserID = userID
-				return []experiments.Experiment{
-					{ID: uuid.New(), UserID: userID},
-					{ID: uuid.New(), UserID: userID},
-				}, nil
-			},
-		}
-		req := newTestRequest("GET", "", "", true)
-		rec := httptest.NewRecorder()
-
-		handleListExperiments(store)(rec, req)
-
-		if rec.Code != http.StatusOK {
-			t.Errorf("status = %d, want 200 (body=%s)", rec.Code, rec.Body.String())
-		}
-		if gotUserID != testUserID {
-			t.Errorf("userID passed to store = %v, want %v", gotUserID, testUserID)
-		}
-		body := decodeEnvelope(t, rec)
-		list, ok := body.Data.([]any)
-		if !ok || len(list) != 2 {
-			t.Errorf("data = %+v, want 2 experiments", body.Data)
-		}
-	})
+			wantStatus: http.StatusInternalServerError, wantCode: "internal_error"},
+	}, newExperimentStore, func(s *fakeStore) http.HandlerFunc { return handleListExperiments(s) })
 }
 
 func TestHandleDeleteExperiment(t *testing.T) {
-	t.Run("unauthenticated", func(t *testing.T) {
-		store := &fakeStore{t: t}
-		req := newTestRequest("DELETE", uuid.New().String(), "", false)
-		rec := httptest.NewRecorder()
-
-		handleDeleteExperiment(store)(rec, req)
-
-		if rec.Code != http.StatusUnauthorized {
-			t.Errorf("status = %d, want 401", rec.Code)
+	id := uuid.New()
+	deleteReturning := func(err error) func(t *testing.T) *fakeStore {
+		return func(t *testing.T) *fakeStore {
+			return &fakeStore{t: t, deleteFn: func(_ context.Context, gotID, userID uuid.UUID) error {
+				wantStoreCall(t, gotID, id, userID)
+				return err
+			}}
 		}
-	})
+	}
 
-	t.Run("invalid id", func(t *testing.T) {
-		store := &fakeStore{t: t}
-		req := newTestRequest("DELETE", "not-a-uuid", "", true)
-		rec := httptest.NewRecorder()
-
-		handleDeleteExperiment(store)(rec, req)
-
-		if rec.Code != http.StatusBadRequest {
-			t.Errorf("status = %d, want 400", rec.Code)
-		}
-		if body := decodeEnvelope(t, rec); body.Error == nil || body.Error.Code != "invalid_id" {
-			t.Errorf("error code = %+v, want invalid_id", body.Error)
-		}
-	})
-
-	t.Run("not found", func(t *testing.T) {
-		store := &fakeStore{
-			t: t,
-			deleteFn: func(ctx context.Context, id, userID uuid.UUID) error {
-				return experiments.ErrNotFound
-			},
-		}
-		req := newTestRequest("DELETE", uuid.New().String(), "", true)
-		rec := httptest.NewRecorder()
-
-		handleDeleteExperiment(store)(rec, req)
-
-		if rec.Code != http.StatusNotFound {
-			t.Errorf("status = %d, want 404", rec.Code)
-		}
-	})
-
-	t.Run("success", func(t *testing.T) {
-		id := uuid.New()
-		var gotID, gotUserID uuid.UUID
-		store := &fakeStore{
-			t: t,
-			deleteFn: func(ctx context.Context, id, userID uuid.UUID) error {
-				gotID = id
-				gotUserID = userID
-				return nil
-			},
-		}
-		req := newTestRequest("DELETE", id.String(), "", true)
-		rec := httptest.NewRecorder()
-
-		handleDeleteExperiment(store)(rec, req)
-
-		if rec.Code != http.StatusOK {
-			t.Errorf("status = %d, want 200 (body=%s)", rec.Code, rec.Body.String())
-		}
-		if gotID != id {
-			t.Errorf("id passed to store = %v, want %v", gotID, id)
-		}
-		if gotUserID != testUserID {
-			t.Errorf("userID passed to store = %v, want %v", gotUserID, testUserID)
-		}
-	})
+	runHandlerCases(t, "DELETE", []handlerCase[*fakeStore]{
+		{name: "unauthenticated", id: id.String(), unauthenticated: true,
+			wantStatus: http.StatusUnauthorized, wantCode: "unauthorized"},
+		{name: "invalid id", id: "not-a-uuid",
+			wantStatus: http.StatusBadRequest, wantCode: "invalid_id"},
+		{name: "success echoes the deleted id", id: id.String(), store: deleteReturning(nil),
+			wantStatus: http.StatusOK,
+			check: func(t *testing.T, body response.Envelope) {
+				if data, _ := body.Data.(map[string]any); data["id"] != id.String() {
+					t.Errorf("data = %+v, want {id: %s}", body.Data, id)
+				}
+			}},
+		{name: "not found", id: id.String(), store: deleteReturning(experiments.ErrNotFound),
+			wantStatus: http.StatusNotFound, wantCode: "not_found"},
+		{name: "store failure", id: id.String(), store: deleteReturning(errStoreDown),
+			wantStatus: http.StatusInternalServerError, wantCode: "internal_error"},
+	}, newExperimentStore, func(s *fakeStore) http.HandlerFunc { return handleDeleteExperiment(s) })
 }
 
 func TestHandleUpdateExperimentConfig(t *testing.T) {
-	t.Run("unauthenticated", func(t *testing.T) {
-		store := &fakeStore{t: t}
-		req := newTestRequest("PATCH", uuid.New().String(), `{"config":{}}`, false)
-		rec := httptest.NewRecorder()
-
-		handleUpdateExperimentConfig(store)(rec, req)
-
-		if rec.Code != http.StatusUnauthorized {
-			t.Errorf("status = %d, want 401", rec.Code)
-		}
-	})
-
-	t.Run("invalid id", func(t *testing.T) {
-		store := &fakeStore{t: t}
-		req := newTestRequest("PATCH", "not-a-uuid", `{"config":{}}`, true)
-		rec := httptest.NewRecorder()
-
-		handleUpdateExperimentConfig(store)(rec, req)
-
-		if rec.Code != http.StatusBadRequest {
-			t.Errorf("status = %d, want 400", rec.Code)
-		}
-		if body := decodeEnvelope(t, rec); body.Error == nil || body.Error.Code != "invalid_id" {
-			t.Errorf("error code = %+v, want invalid_id", body.Error)
-		}
-	})
-
-	t.Run("missing config", func(t *testing.T) {
-		store := &fakeStore{t: t}
-		req := newTestRequest("PATCH", uuid.New().String(), `{}`, true)
-		rec := httptest.NewRecorder()
-
-		handleUpdateExperimentConfig(store)(rec, req)
-
-		if rec.Code != http.StatusBadRequest {
-			t.Errorf("status = %d, want 400", rec.Code)
-		}
-		if body := decodeEnvelope(t, rec); body.Error == nil || body.Error.Code != "invalid_config" {
-			t.Errorf("error code = %+v, want invalid_config", body.Error)
-		}
-	})
-
-	t.Run("not found", func(t *testing.T) {
-		store := &fakeStore{
-			t: t,
-			updateConfigFn: func(ctx context.Context, id, userID uuid.UUID, config map[string]any) (experiments.Experiment, error) {
-				return experiments.Experiment{}, experiments.ErrNotFound
-			},
-		}
-		req := newTestRequest("PATCH", uuid.New().String(), `{"config":{"x_axis_label":"v"}}`, true)
-		rec := httptest.NewRecorder()
-
-		handleUpdateExperimentConfig(store)(rec, req)
-
-		if rec.Code != http.StatusNotFound {
-			t.Errorf("status = %d, want 404", rec.Code)
-		}
-	})
-
-	t.Run("success", func(t *testing.T) {
-		id := uuid.New()
-		store := &fakeStore{
-			t: t,
-			updateConfigFn: func(ctx context.Context, gotID, userID uuid.UUID, config map[string]any) (experiments.Experiment, error) {
+	id := uuid.New()
+	// updateConfig checks the store is handed the request's config as-is,
+	// then answers with err, or else with the experiment carrying it.
+	updateConfig := func(wantConfig map[string]any, err error) func(t *testing.T) *fakeStore {
+		return func(t *testing.T) *fakeStore {
+			return &fakeStore{t: t, updateConfigFn: func(_ context.Context, gotID, userID uuid.UUID, config map[string]any) (experiments.Experiment, error) {
+				wantStoreCall(t, gotID, id, userID)
+				if !reflect.DeepEqual(config, wantConfig) {
+					t.Errorf("config passed to store = %#v, want %#v", config, wantConfig)
+				}
+				if err != nil {
+					return experiments.Experiment{}, err
+				}
 				return experiments.Experiment{ID: gotID, UserID: userID, Config: config}, nil
-			},
+			}}
 		}
-		req := newTestRequest("PATCH", id.String(), `{"config":{"x_axis_label":"v"}}`, true)
-		rec := httptest.NewRecorder()
-
-		handleUpdateExperimentConfig(store)(rec, req)
-
-		if rec.Code != http.StatusOK {
-			t.Errorf("status = %d, want 200 (body=%s)", rec.Code, rec.Body.String())
+	}
+	wantDataConfig := func(want map[string]any) func(t *testing.T, body response.Envelope) {
+		return func(t *testing.T, body response.Envelope) {
+			data, _ := body.Data.(map[string]any)
+			if !reflect.DeepEqual(data["config"], want) {
+				t.Errorf("data.config = %#v, want %#v", data["config"], want)
+			}
 		}
-	})
+	}
+	labels := map[string]any{"x_axis_label": "v", "fit": map[string]any{"formula": "a*x"}}
+
+	runHandlerCases(t, "PATCH", []handlerCase[*fakeStore]{
+		{name: "unauthenticated", id: id.String(), body: `{"config":{}}`, unauthenticated: true,
+			wantStatus: http.StatusUnauthorized, wantCode: "unauthorized"},
+		{name: "invalid id", id: "not-a-uuid", body: `{"config":{}}`,
+			wantStatus: http.StatusBadRequest, wantCode: "invalid_id"},
+		{name: "missing config", id: id.String(), body: `{}`,
+			wantStatus: http.StatusBadRequest, wantCode: "invalid_config"},
+		{name: "null config is missing too", id: id.String(), body: `{"config":null}`,
+			wantStatus: http.StatusBadRequest, wantCode: "invalid_config"},
+		{name: "success stores the config as sent", id: id.String(),
+			body:       `{"config":{"x_axis_label":"v","fit":{"formula":"a*x"}}}`,
+			store:      updateConfig(labels, nil),
+			wantStatus: http.StatusOK, check: wantDataConfig(labels)},
+		// {} is a config, not a missing one: it clears every setting. The
+		// replace-not-merge semantics are why the frontend merges before
+		// writing (KAN-29).
+		{name: "empty config clears it", id: id.String(), body: `{"config":{}}`,
+			store:      updateConfig(map[string]any{}, nil),
+			wantStatus: http.StatusOK, check: wantDataConfig(map[string]any{})},
+		{name: "not found", id: id.String(), body: `{"config":{"x_axis_label":"v"}}`,
+			store:      updateConfig(map[string]any{"x_axis_label": "v"}, experiments.ErrNotFound),
+			wantStatus: http.StatusNotFound, wantCode: "not_found"},
+		{name: "store failure", id: id.String(), body: `{"config":{"x_axis_label":"v"}}`,
+			store:      updateConfig(map[string]any{"x_axis_label": "v"}, errStoreDown),
+			wantStatus: http.StatusInternalServerError, wantCode: "internal_error"},
+	}, newExperimentStore, func(s *fakeStore) http.HandlerFunc { return handleUpdateExperimentConfig(s) })
 }
 
 func TestHandleUpdateExperimentRawData(t *testing.T) {
-	t.Run("unauthenticated", func(t *testing.T) {
-		store := &fakeStore{t: t}
-		req := newTestRequest("PATCH", uuid.New().String(), `{"raw_data":{}}`, false)
-		rec := httptest.NewRecorder()
+	id := uuid.New()
+	thisKey, err := cache.AnalysisKey(id, "linear_regression", map[string]any{})
+	if err != nil {
+		t.Fatalf("compute cache key: %v", err)
+	}
+	otherKey, err := cache.AnalysisKey(uuid.New(), "linear_regression", map[string]any{})
+	if err != nil {
+		t.Fatalf("compute cache key: %v", err)
+	}
 
-		handleUpdateExperimentRawData(store, newFakeCache())(rec, req)
-
-		if rec.Code != http.StatusUnauthorized {
-			t.Errorf("status = %d, want 401", rec.Code)
-		}
-	})
-
-	t.Run("invalid id", func(t *testing.T) {
-		store := &fakeStore{t: t}
-		req := newTestRequest("PATCH", "not-a-uuid", `{"raw_data":{}}`, true)
-		rec := httptest.NewRecorder()
-
-		handleUpdateExperimentRawData(store, newFakeCache())(rec, req)
-
-		if rec.Code != http.StatusBadRequest {
-			t.Errorf("status = %d, want 400", rec.Code)
-		}
-		if body := decodeEnvelope(t, rec); body.Error == nil || body.Error.Code != "invalid_id" {
-			t.Errorf("error code = %+v, want invalid_id", body.Error)
-		}
-	})
-
-	t.Run("missing raw_data", func(t *testing.T) {
-		store := &fakeStore{t: t}
-		req := newTestRequest("PATCH", uuid.New().String(), `{}`, true)
-		rec := httptest.NewRecorder()
-
-		handleUpdateExperimentRawData(store, newFakeCache())(rec, req)
-
-		if rec.Code != http.StatusBadRequest {
-			t.Errorf("status = %d, want 400", rec.Code)
-		}
-		if body := decodeEnvelope(t, rec); body.Error == nil || body.Error.Code != "invalid_raw_data" {
-			t.Errorf("error code = %+v, want invalid_raw_data", body.Error)
-		}
-	})
-
-	t.Run("not found", func(t *testing.T) {
-		store := &fakeStore{
-			t: t,
-			updateRawDataFn: func(ctx context.Context, id, userID uuid.UUID, rawData map[string]any) (experiments.Experiment, error) {
-				return experiments.Experiment{}, experiments.ErrNotFound
-			},
-		}
-		req := newTestRequest("PATCH", uuid.New().String(), `{"raw_data":{"columns":{"x":[1]}}}`, true)
-		rec := httptest.NewRecorder()
-
-		handleUpdateExperimentRawData(store, newFakeCache())(rec, req)
-
-		if rec.Code != http.StatusNotFound {
-			t.Errorf("status = %d, want 404", rec.Code)
-		}
-	})
-
-	t.Run("success invalidates any cached analysis results for the experiment", func(t *testing.T) {
-		id := uuid.New()
-		fc := newFakeCache()
-		staleKey, err := cache.AnalysisKey(id, "linear_regression", map[string]any{})
-		if err != nil {
-			t.Fatalf("compute cache key: %v", err)
-		}
-		fc.store[staleKey] = []byte(`{"data":{"result":{"slope":1}},"error":null,"meta":{}}`)
-		otherKey, err := cache.AnalysisKey(uuid.New(), "linear_regression", map[string]any{})
-		if err != nil {
-			t.Fatalf("compute cache key: %v", err)
-		}
+	// Each row gets a fresh cache holding a result for this experiment and
+	// one for another, built when the runner builds the row's handler; the
+	// row's check reads it afterwards. Rows run in order, never in parallel.
+	var fc *fakeCache
+	handler := func(s *fakeStore) http.HandlerFunc {
+		fc = newFakeCache()
+		fc.store[thisKey] = []byte(`{"data":{"result":{"slope":1}},"error":null,"meta":{}}`)
 		fc.store[otherKey] = []byte(`{"data":{"result":{"slope":9}},"error":null,"meta":{}}`)
+		return handleUpdateExperimentRawData(s, fc)
+	}
+	updateRawData := func(err error) func(t *testing.T) *fakeStore {
+		return func(t *testing.T) *fakeStore {
+			return &fakeStore{t: t, updateRawDataFn: func(_ context.Context, gotID, userID uuid.UUID, rawData map[string]any) (experiments.Experiment, error) {
+				wantStoreCall(t, gotID, id, userID)
+				if rawData == nil {
+					t.Error("raw_data was not passed to store")
+				}
+				if err != nil {
+					return experiments.Experiment{}, err
+				}
+				return experiments.Experiment{ID: gotID, UserID: userID, RawData: rawData}, nil
+			}}
+		}
+	}
+	// A failed update left the data as it was, so the cached results still
+	// describe it; throwing them away would only cost a recompute. A
+	// successful one must drop this experiment's results -- they were
+	// computed from the old data and would be served for up to a day --
+	// and only this experiment's.
+	wantCached := func(this bool) func(t *testing.T, _ response.Envelope) {
+		return func(t *testing.T, _ response.Envelope) {
+			if _, ok := fc.store[thisKey]; ok != this {
+				t.Errorf("this experiment's cached result present = %v, want %v", ok, this)
+			}
+			if _, ok := fc.store[otherKey]; !ok {
+				t.Error("another experiment's cached result was invalidated")
+			}
+		}
+	}
+	const body = `{"raw_data":{"columns":{"x":[1,2],"y":[2,4]}}}`
 
-		var gotID, gotUserID uuid.UUID
-		var gotRawData map[string]any
-		store := &fakeStore{
-			t: t,
-			updateRawDataFn: func(ctx context.Context, id, userID uuid.UUID, rawData map[string]any) (experiments.Experiment, error) {
-				gotID = id
-				gotUserID = userID
-				gotRawData = rawData
-				return experiments.Experiment{ID: id, UserID: userID, RawData: rawData}, nil
-			},
-		}
-		req := newTestRequest("PATCH", id.String(), `{"raw_data":{"columns":{"x":[1,2],"y":[2,4]}}}`, true)
-		rec := httptest.NewRecorder()
-
-		handleUpdateExperimentRawData(store, fc)(rec, req)
-
-		if rec.Code != http.StatusOK {
-			t.Errorf("status = %d, want 200 (body=%s)", rec.Code, rec.Body.String())
-		}
-		if gotID != id {
-			t.Errorf("id passed to store = %v, want %v", gotID, id)
-		}
-		if gotUserID != testUserID {
-			t.Errorf("userID passed to store = %v, want %v", gotUserID, testUserID)
-		}
-		if gotRawData == nil {
-			t.Fatal("raw_data was not passed to store")
-		}
-		if _, ok := fc.store[staleKey]; ok {
-			t.Error("stale cached analysis result for this experiment was not invalidated")
-		}
-		if _, ok := fc.store[otherKey]; !ok {
-			t.Error("another experiment's cached analysis result was incorrectly invalidated")
-		}
-	})
+	runHandlerCases(t, "PATCH", []handlerCase[*fakeStore]{
+		{name: "unauthenticated", id: id.String(), body: body, unauthenticated: true,
+			wantStatus: http.StatusUnauthorized, wantCode: "unauthorized", check: wantCached(true)},
+		{name: "invalid id", id: "not-a-uuid", body: body,
+			wantStatus: http.StatusBadRequest, wantCode: "invalid_id", check: wantCached(true)},
+		{name: "missing raw_data", id: id.String(), body: `{}`,
+			wantStatus: http.StatusBadRequest, wantCode: "invalid_raw_data", check: wantCached(true)},
+		{name: "success invalidates this experiment's cached results", id: id.String(), body: body,
+			store: updateRawData(nil), wantStatus: http.StatusOK, check: wantCached(false)},
+		{name: "not found leaves the cache alone", id: id.String(), body: body,
+			store:      updateRawData(experiments.ErrNotFound),
+			wantStatus: http.StatusNotFound, wantCode: "not_found", check: wantCached(true)},
+		{name: "store failure leaves the cache alone", id: id.String(), body: body,
+			store:      updateRawData(errStoreDown),
+			wantStatus: http.StatusInternalServerError, wantCode: "internal_error", check: wantCached(true)},
+	}, newExperimentStore, handler)
 }
