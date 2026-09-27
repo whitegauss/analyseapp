@@ -50,6 +50,15 @@ func TestRateLimiting(t *testing.T) {
 	if body.Error == nil || body.Error.Code != "rate_limited" {
 		t.Errorf("error = %+v, want code rate_limited", body.Error)
 	}
+	// httprate's headers survive the custom limit handler, so a client can
+	// tell when to come back instead of retrying blind. Pinned because
+	// swapping the handler is exactly the change that could drop them.
+	if got := rec.Header().Get("Retry-After"); got != "60" {
+		t.Errorf("Retry-After = %q, want 60 (the window, in seconds)", got)
+	}
+	if got := rec.Header().Get("X-RateLimit-Remaining"); got != "0" {
+		t.Errorf("X-RateLimit-Remaining = %q, want 0", got)
+	}
 
 	// A different client IP has its own, unaffected bucket.
 	rec = httptest.NewRecorder()

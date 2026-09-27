@@ -74,6 +74,9 @@ type handlerCase[S any] struct {
 	wantCode string
 	// check makes further assertions on the decoded envelope.
 	check func(t *testing.T, body response.Envelope)
+	// checkResponse makes assertions only the raw response can answer:
+	// headers, or a body that must be passed through byte for byte.
+	checkResponse func(t *testing.T, rec *httptest.ResponseRecorder)
 }
 
 // runHandlerCases runs each row as a subtest: builds its store (or
@@ -110,6 +113,9 @@ func runHandlerCases[S any](
 			}
 			if tc.check != nil {
 				tc.check(t, body)
+			}
+			if tc.checkResponse != nil {
+				tc.checkResponse(t, rec)
 			}
 		})
 	}
