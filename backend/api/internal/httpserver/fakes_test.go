@@ -110,7 +110,10 @@ func (f *fakeStore) Delete(ctx context.Context, id, userID uuid.UUID) error {
 // tests, so handler validation/status-code logic is testable without a
 // database. Unset function fields fail the test if called.
 type fakeProjectStore struct {
-	t               *testing.T
+	t *testing.T
+	// ensureProfileFn is optional, like fakeStore's: nil means
+	// EnsureProfile succeeds.
+	ensureProfileFn func(ctx context.Context, userID uuid.UUID) error
 	createFn        func(ctx context.Context, userID uuid.UUID, title, description string) (projects.Project, error)
 	ensureDefaultFn func(ctx context.Context, userID uuid.UUID) (projects.Project, error)
 	getByIDFn       func(ctx context.Context, id, userID uuid.UUID) (projects.Project, error)
@@ -120,7 +123,10 @@ type fakeProjectStore struct {
 }
 
 func (f *fakeProjectStore) EnsureProfile(ctx context.Context, userID uuid.UUID) error {
-	return nil
+	if f.ensureProfileFn == nil {
+		return nil
+	}
+	return f.ensureProfileFn(ctx, userID)
 }
 
 func (f *fakeProjectStore) Create(ctx context.Context, userID uuid.UUID, title, description string) (projects.Project, error) {

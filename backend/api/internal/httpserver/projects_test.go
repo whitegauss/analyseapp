@@ -3,359 +3,207 @@ package httpserver
 import (
 	"context"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"github.com/google/uuid"
 
 	"analyseapp/api/internal/projects"
+	"analyseapp/api/internal/response"
 )
 
+// newProjectStore is the default store for the tables below: every method
+// fails the test if called.
+func newProjectStore(t *testing.T) *fakeProjectStore { return &fakeProjectStore{t: t} }
+
+// wantProject checks the response carries the project the store returned.
+func wantProject(id uuid.UUID, title, description string) func(t *testing.T, body response.Envelope) {
+	return func(t *testing.T, body response.Envelope) {
+		data, _ := body.Data.(map[string]any)
+		if data["id"] != id.String() || data["title"] != title || data["description"] != description {
+			t.Errorf("data = %+v, want project %v %q %q", body.Data, id, title, description)
+		}
+	}
+}
+
 func TestHandleCreateProject(t *testing.T) {
-	t.Run("unauthenticated", func(t *testing.T) {
-		store := &fakeProjectStore{t: t}
-		req := newTestRequest("POST", "", `{"title":"x"}`, false)
-		rec := httptest.NewRecorder()
+	createdID := uuid.New()
+	const body = `{"title":"my project","description":"desc"}`
 
-		handleCreateProject(store)(rec, req)
-
-		if rec.Code != http.StatusUnauthorized {
-			t.Errorf("status = %d, want 401", rec.Code)
+	// stores builds the success path: a profile ensured, then a Create that
+	// checks it was handed the request's title and description on behalf of
+	// the authenticated user -- after the profile, whose row
+	// projects.user_id references.
+	stores := func(createErr error) func(t *testing.T) *fakeProjectStore {
+		return func(t *testing.T) *fakeProjectStore {
+			ensured := false
+			return &fakeProjectStore{
+				t: t,
+				ensureProfileFn: func(context.Context, uuid.UUID) error {
+					ensured = true
+					return nil
+				},
+				createFn: func(_ context.Context, userID uuid.UUID, title, description string) (projects.Project, error) {
+					if !ensured {
+						t.Error("Create was called before EnsureProfile")
+					}
+					if userID != testUserID {
+						t.Errorf("userID passed to store = %v, want the authenticated user %v", userID, testUserID)
+					}
+					if title != "my project" || description != "desc" {
+						t.Errorf("title, description passed to store = %q, %q, want the request's", title, description)
+					}
+					if createErr != nil {
+						return projects.Project{}, createErr
+					}
+					return projects.Project{ID: createdID, UserID: userID, Title: title, Description: description}, nil
+				},
+			}
 		}
-	})
+	}
 
-	t.Run("invalid JSON body", func(t *testing.T) {
-		store := &fakeProjectStore{t: t}
-		req := newTestRequest("POST", "", `not json`, true)
-		rec := httptest.NewRecorder()
-
-		handleCreateProject(store)(rec, req)
-
-		if rec.Code != http.StatusBadRequest {
-			t.Errorf("status = %d, want 400", rec.Code)
-		}
-		if body := decodeEnvelope(t, rec); body.Error == nil || body.Error.Code != "invalid_body" {
-			t.Errorf("error code = %+v, want invalid_body", body.Error)
-		}
-	})
-
-	t.Run("missing title", func(t *testing.T) {
-		store := &fakeProjectStore{t: t}
-		req := newTestRequest("POST", "", `{"description":"x"}`, true)
-		rec := httptest.NewRecorder()
-
-		handleCreateProject(store)(rec, req)
-
-		if rec.Code != http.StatusBadRequest {
-			t.Errorf("status = %d, want 400", rec.Code)
-		}
-		if body := decodeEnvelope(t, rec); body.Error == nil || body.Error.Code != "invalid_title" {
-			t.Errorf("error code = %+v, want invalid_title", body.Error)
-		}
-	})
-
-	t.Run("success", func(t *testing.T) {
-		store := &fakeProjectStore{
-			t: t,
-			createFn: func(ctx context.Context, userID uuid.UUID, title, description string) (projects.Project, error) {
-				return projects.Project{ID: uuid.New(), UserID: userID, Title: title, Description: description}, nil
+	runHandlerCases(t, "POST", []handlerCase[*fakeProjectStore]{
+		{name: "unauthenticated", body: body, unauthenticated: true,
+			wantStatus: http.StatusUnauthorized, wantCode: "unauthorized"},
+		{name: "invalid JSON body", body: `not json`,
+			wantStatus: http.StatusBadRequest, wantCode: "invalid_body"},
+		{name: "missing title", body: `{"description":"x"}`,
+			wantStatus: http.StatusBadRequest, wantCode: "invalid_title"},
+		{name: "success returns the created project", body: body, store: stores(nil),
+			wantStatus: http.StatusCreated, check: wantProject(createdID, "my project", "desc")},
+		{name: "profile cannot be ensured", body: body,
+			store: func(t *testing.T) *fakeProjectStore {
+				return &fakeProjectStore{t: t, ensureProfileFn: func(context.Context, uuid.UUID) error {
+					return errStoreDown
+				}}
 			},
-		}
-		req := newTestRequest("POST", "", `{"title":"my project","description":"desc"}`, true)
-		rec := httptest.NewRecorder()
-
-		handleCreateProject(store)(rec, req)
-
-		if rec.Code != http.StatusCreated {
-			t.Errorf("status = %d, want 201 (body=%s)", rec.Code, rec.Body.String())
-		}
-	})
+			wantStatus: http.StatusInternalServerError, wantCode: "internal_error"},
+		{name: "store failure", body: body, store: stores(errStoreDown),
+			wantStatus: http.StatusInternalServerError, wantCode: "internal_error"},
+	}, newProjectStore, func(s *fakeProjectStore) http.HandlerFunc { return handleCreateProject(s) })
 }
 
 func TestHandleListProjects(t *testing.T) {
-	t.Run("unauthenticated", func(t *testing.T) {
-		store := &fakeProjectStore{t: t}
-		req := newTestRequest("GET", "", "", false)
-		rec := httptest.NewRecorder()
-
-		handleListProjects(store)(rec, req)
-
-		if rec.Code != http.StatusUnauthorized {
-			t.Errorf("status = %d, want 401", rec.Code)
+	listByUser := func(n int, err error) func(t *testing.T) *fakeProjectStore {
+		return func(t *testing.T) *fakeProjectStore {
+			return &fakeProjectStore{t: t, listByUserFn: func(_ context.Context, userID uuid.UUID) ([]projects.Project, error) {
+				if userID != testUserID {
+					t.Errorf("userID passed to store = %v, want the authenticated user %v", userID, testUserID)
+				}
+				if err != nil {
+					return nil, err
+				}
+				list := []projects.Project{}
+				for range n {
+					list = append(list, projects.Project{ID: uuid.New(), UserID: userID})
+				}
+				return list, nil
+			}}
 		}
-	})
+	}
+	wantLen := func(n int) func(t *testing.T, body response.Envelope) {
+		return func(t *testing.T, body response.Envelope) {
+			if list, ok := body.Data.([]any); !ok || len(list) != n {
+				t.Errorf("data = %+v, want an array of %d", body.Data, n)
+			}
+		}
+	}
 
-	t.Run("empty list", func(t *testing.T) {
-		store := &fakeProjectStore{
-			t: t,
-			listByUserFn: func(ctx context.Context, userID uuid.UUID) ([]projects.Project, error) {
-				return []projects.Project{}, nil
-			},
-		}
-		req := newTestRequest("GET", "", "", true)
-		rec := httptest.NewRecorder()
-
-		handleListProjects(store)(rec, req)
-
-		if rec.Code != http.StatusOK {
-			t.Errorf("status = %d, want 200 (body=%s)", rec.Code, rec.Body.String())
-		}
-		body := decodeEnvelope(t, rec)
-		list, ok := body.Data.([]any)
-		if !ok || len(list) != 0 {
-			t.Errorf("data = %+v, want an empty array", body.Data)
-		}
-	})
-
-	t.Run("success returns the user's projects", func(t *testing.T) {
-		var gotUserID uuid.UUID
-		store := &fakeProjectStore{
-			t: t,
-			listByUserFn: func(ctx context.Context, userID uuid.UUID) ([]projects.Project, error) {
-				gotUserID = userID
-				return []projects.Project{
-					{ID: uuid.New(), UserID: userID},
-					{ID: uuid.New(), UserID: userID},
-				}, nil
-			},
-		}
-		req := newTestRequest("GET", "", "", true)
-		rec := httptest.NewRecorder()
-
-		handleListProjects(store)(rec, req)
-
-		if rec.Code != http.StatusOK {
-			t.Errorf("status = %d, want 200 (body=%s)", rec.Code, rec.Body.String())
-		}
-		if gotUserID != testUserID {
-			t.Errorf("userID passed to store = %v, want %v", gotUserID, testUserID)
-		}
-		body := decodeEnvelope(t, rec)
-		list, ok := body.Data.([]any)
-		if !ok || len(list) != 2 {
-			t.Errorf("data = %+v, want 2 projects", body.Data)
-		}
-	})
+	runHandlerCases(t, "GET", []handlerCase[*fakeProjectStore]{
+		{name: "unauthenticated", unauthenticated: true,
+			wantStatus: http.StatusUnauthorized, wantCode: "unauthorized"},
+		{name: "success returns the user's projects", store: listByUser(2, nil),
+			wantStatus: http.StatusOK, check: wantLen(2)},
+		// An empty array, not null: the dashboard calls .map() on this.
+		{name: "no projects is an empty array", store: listByUser(0, nil),
+			wantStatus: http.StatusOK, check: wantLen(0)},
+		{name: "store failure", store: listByUser(0, errStoreDown),
+			wantStatus: http.StatusInternalServerError, wantCode: "internal_error"},
+	}, newProjectStore, func(s *fakeProjectStore) http.HandlerFunc { return handleListProjects(s) })
 }
 
 func TestHandleGetProject(t *testing.T) {
-	t.Run("unauthenticated", func(t *testing.T) {
-		store := &fakeProjectStore{t: t}
-		req := newTestRequest("GET", uuid.New().String(), "", false)
-		rec := httptest.NewRecorder()
-
-		handleGetProject(store)(rec, req)
-
-		if rec.Code != http.StatusUnauthorized {
-			t.Errorf("status = %d, want 401", rec.Code)
-		}
-	})
-
-	t.Run("invalid id", func(t *testing.T) {
-		store := &fakeProjectStore{t: t}
-		req := newTestRequest("GET", "not-a-uuid", "", true)
-		rec := httptest.NewRecorder()
-
-		handleGetProject(store)(rec, req)
-
-		if rec.Code != http.StatusBadRequest {
-			t.Errorf("status = %d, want 400", rec.Code)
-		}
-		if body := decodeEnvelope(t, rec); body.Error == nil || body.Error.Code != "invalid_id" {
-			t.Errorf("error code = %+v, want invalid_id", body.Error)
-		}
-	})
-
-	t.Run("not found", func(t *testing.T) {
-		store := &fakeProjectStore{
-			t: t,
-			getByIDFn: func(ctx context.Context, id, userID uuid.UUID) (projects.Project, error) {
-				return projects.Project{}, projects.ErrNotFound
-			},
-		}
-		req := newTestRequest("GET", uuid.New().String(), "", true)
-		rec := httptest.NewRecorder()
-
-		handleGetProject(store)(rec, req)
-
-		if rec.Code != http.StatusNotFound {
-			t.Errorf("status = %d, want 404", rec.Code)
-		}
-	})
-
-	t.Run("success", func(t *testing.T) {
-		id := uuid.New()
-		store := &fakeProjectStore{
-			t: t,
-			getByIDFn: func(ctx context.Context, gotID, userID uuid.UUID) (projects.Project, error) {
-				if gotID != id {
-					t.Errorf("id = %v, want %v", gotID, id)
+	id := uuid.New()
+	getByID := func(err error) func(t *testing.T) *fakeProjectStore {
+		return func(t *testing.T) *fakeProjectStore {
+			return &fakeProjectStore{t: t, getByIDFn: func(_ context.Context, gotID, userID uuid.UUID) (projects.Project, error) {
+				wantStoreCall(t, gotID, id, userID)
+				if err != nil {
+					return projects.Project{}, err
 				}
-				if userID != testUserID {
-					t.Errorf("userID = %v, want %v", userID, testUserID)
-				}
-				return projects.Project{ID: id, UserID: userID}, nil
-			},
+				return projects.Project{ID: gotID, UserID: userID, Title: "p", Description: "d"}, nil
+			}}
 		}
-		req := newTestRequest("GET", id.String(), "", true)
-		rec := httptest.NewRecorder()
+	}
 
-		handleGetProject(store)(rec, req)
-
-		if rec.Code != http.StatusOK {
-			t.Errorf("status = %d, want 200 (body=%s)", rec.Code, rec.Body.String())
-		}
-	})
+	runHandlerCases(t, "GET", []handlerCase[*fakeProjectStore]{
+		{name: "unauthenticated", id: id.String(), unauthenticated: true,
+			wantStatus: http.StatusUnauthorized, wantCode: "unauthorized"},
+		{name: "invalid id", id: "not-a-uuid",
+			wantStatus: http.StatusBadRequest, wantCode: "invalid_id"},
+		{name: "success returns the stored project", id: id.String(), store: getByID(nil),
+			wantStatus: http.StatusOK, check: wantProject(id, "p", "d")},
+		{name: "not found", id: id.String(), store: getByID(projects.ErrNotFound),
+			wantStatus: http.StatusNotFound, wantCode: "not_found", check: wantMessage("project not found")},
+		{name: "store failure", id: id.String(), store: getByID(errStoreDown),
+			wantStatus: http.StatusInternalServerError, wantCode: "internal_error"},
+	}, newProjectStore, func(s *fakeProjectStore) http.HandlerFunc { return handleGetProject(s) })
 }
 
 func TestHandleUpdateProject(t *testing.T) {
-	t.Run("unauthenticated", func(t *testing.T) {
-		store := &fakeProjectStore{t: t}
-		req := newTestRequest("PATCH", uuid.New().String(), `{"title":"x"}`, false)
-		rec := httptest.NewRecorder()
-
-		handleUpdateProject(store)(rec, req)
-
-		if rec.Code != http.StatusUnauthorized {
-			t.Errorf("status = %d, want 401", rec.Code)
-		}
-	})
-
-	t.Run("invalid id", func(t *testing.T) {
-		store := &fakeProjectStore{t: t}
-		req := newTestRequest("PATCH", "not-a-uuid", `{"title":"x"}`, true)
-		rec := httptest.NewRecorder()
-
-		handleUpdateProject(store)(rec, req)
-
-		if rec.Code != http.StatusBadRequest {
-			t.Errorf("status = %d, want 400", rec.Code)
-		}
-		if body := decodeEnvelope(t, rec); body.Error == nil || body.Error.Code != "invalid_id" {
-			t.Errorf("error code = %+v, want invalid_id", body.Error)
-		}
-	})
-
-	t.Run("missing title", func(t *testing.T) {
-		store := &fakeProjectStore{t: t}
-		req := newTestRequest("PATCH", uuid.New().String(), `{"description":"x"}`, true)
-		rec := httptest.NewRecorder()
-
-		handleUpdateProject(store)(rec, req)
-
-		if rec.Code != http.StatusBadRequest {
-			t.Errorf("status = %d, want 400", rec.Code)
-		}
-		if body := decodeEnvelope(t, rec); body.Error == nil || body.Error.Code != "invalid_title" {
-			t.Errorf("error code = %+v, want invalid_title", body.Error)
-		}
-	})
-
-	t.Run("not found", func(t *testing.T) {
-		store := &fakeProjectStore{
-			t: t,
-			updateFn: func(ctx context.Context, id, userID uuid.UUID, title, description string) (projects.Project, error) {
-				return projects.Project{}, projects.ErrNotFound
-			},
-		}
-		req := newTestRequest("PATCH", uuid.New().String(), `{"title":"x"}`, true)
-		rec := httptest.NewRecorder()
-
-		handleUpdateProject(store)(rec, req)
-
-		if rec.Code != http.StatusNotFound {
-			t.Errorf("status = %d, want 404", rec.Code)
-		}
-	})
-
-	t.Run("success", func(t *testing.T) {
-		id := uuid.New()
-		store := &fakeProjectStore{
-			t: t,
-			updateFn: func(ctx context.Context, gotID, userID uuid.UUID, title, description string) (projects.Project, error) {
+	id := uuid.New()
+	const body = `{"title":"new title","description":"new desc"}`
+	update := func(err error) func(t *testing.T) *fakeProjectStore {
+		return func(t *testing.T) *fakeProjectStore {
+			return &fakeProjectStore{t: t, updateFn: func(_ context.Context, gotID, userID uuid.UUID, title, description string) (projects.Project, error) {
+				wantStoreCall(t, gotID, id, userID)
+				if title != "new title" || description != "new desc" {
+					t.Errorf("title, description passed to store = %q, %q, want the request's", title, description)
+				}
+				if err != nil {
+					return projects.Project{}, err
+				}
 				return projects.Project{ID: gotID, UserID: userID, Title: title, Description: description}, nil
-			},
+			}}
 		}
-		req := newTestRequest("PATCH", id.String(), `{"title":"new title","description":"new desc"}`, true)
-		rec := httptest.NewRecorder()
+	}
 
-		handleUpdateProject(store)(rec, req)
-
-		if rec.Code != http.StatusOK {
-			t.Errorf("status = %d, want 200 (body=%s)", rec.Code, rec.Body.String())
-		}
-	})
+	runHandlerCases(t, "PATCH", []handlerCase[*fakeProjectStore]{
+		{name: "unauthenticated", id: id.String(), body: body, unauthenticated: true,
+			wantStatus: http.StatusUnauthorized, wantCode: "unauthorized"},
+		{name: "invalid id", id: "not-a-uuid", body: body,
+			wantStatus: http.StatusBadRequest, wantCode: "invalid_id"},
+		{name: "missing title", id: id.String(), body: `{"description":"x"}`,
+			wantStatus: http.StatusBadRequest, wantCode: "invalid_title"},
+		{name: "success returns the updated project", id: id.String(), body: body, store: update(nil),
+			wantStatus: http.StatusOK, check: wantProject(id, "new title", "new desc")},
+		{name: "not found", id: id.String(), body: body, store: update(projects.ErrNotFound),
+			wantStatus: http.StatusNotFound, wantCode: "not_found"},
+		{name: "store failure", id: id.String(), body: body, store: update(errStoreDown),
+			wantStatus: http.StatusInternalServerError, wantCode: "internal_error"},
+	}, newProjectStore, func(s *fakeProjectStore) http.HandlerFunc { return handleUpdateProject(s) })
 }
 
 func TestHandleDeleteProject(t *testing.T) {
-	t.Run("unauthenticated", func(t *testing.T) {
-		store := &fakeProjectStore{t: t}
-		req := newTestRequest("DELETE", uuid.New().String(), "", false)
-		rec := httptest.NewRecorder()
-
-		handleDeleteProject(store)(rec, req)
-
-		if rec.Code != http.StatusUnauthorized {
-			t.Errorf("status = %d, want 401", rec.Code)
+	id := uuid.New()
+	deleteReturning := func(err error) func(t *testing.T) *fakeProjectStore {
+		return func(t *testing.T) *fakeProjectStore {
+			return &fakeProjectStore{t: t, deleteFn: func(_ context.Context, gotID, userID uuid.UUID) error {
+				wantStoreCall(t, gotID, id, userID)
+				return err
+			}}
 		}
-	})
+	}
 
-	t.Run("invalid id", func(t *testing.T) {
-		store := &fakeProjectStore{t: t}
-		req := newTestRequest("DELETE", "not-a-uuid", "", true)
-		rec := httptest.NewRecorder()
-
-		handleDeleteProject(store)(rec, req)
-
-		if rec.Code != http.StatusBadRequest {
-			t.Errorf("status = %d, want 400", rec.Code)
-		}
-		if body := decodeEnvelope(t, rec); body.Error == nil || body.Error.Code != "invalid_id" {
-			t.Errorf("error code = %+v, want invalid_id", body.Error)
-		}
-	})
-
-	t.Run("not found", func(t *testing.T) {
-		store := &fakeProjectStore{
-			t: t,
-			deleteFn: func(ctx context.Context, id, userID uuid.UUID) error {
-				return projects.ErrNotFound
-			},
-		}
-		req := newTestRequest("DELETE", uuid.New().String(), "", true)
-		rec := httptest.NewRecorder()
-
-		handleDeleteProject(store)(rec, req)
-
-		if rec.Code != http.StatusNotFound {
-			t.Errorf("status = %d, want 404", rec.Code)
-		}
-	})
-
-	t.Run("success", func(t *testing.T) {
-		id := uuid.New()
-		var gotID, gotUserID uuid.UUID
-		store := &fakeProjectStore{
-			t: t,
-			deleteFn: func(ctx context.Context, id, userID uuid.UUID) error {
-				gotID = id
-				gotUserID = userID
-				return nil
-			},
-		}
-		req := newTestRequest("DELETE", id.String(), "", true)
-		rec := httptest.NewRecorder()
-
-		handleDeleteProject(store)(rec, req)
-
-		if rec.Code != http.StatusOK {
-			t.Errorf("status = %d, want 200 (body=%s)", rec.Code, rec.Body.String())
-		}
-		if gotID != id {
-			t.Errorf("id passed to store = %v, want %v", gotID, id)
-		}
-		if gotUserID != testUserID {
-			t.Errorf("userID passed to store = %v, want %v", gotUserID, testUserID)
-		}
-	})
+	runHandlerCases(t, "DELETE", []handlerCase[*fakeProjectStore]{
+		{name: "unauthenticated", id: id.String(), unauthenticated: true,
+			wantStatus: http.StatusUnauthorized, wantCode: "unauthorized"},
+		{name: "invalid id", id: "not-a-uuid",
+			wantStatus: http.StatusBadRequest, wantCode: "invalid_id"},
+		{name: "success echoes the deleted id", id: id.String(), store: deleteReturning(nil),
+			wantStatus: http.StatusOK, check: wantData("id", id.String())},
+		{name: "not found", id: id.String(), store: deleteReturning(projects.ErrNotFound),
+			wantStatus: http.StatusNotFound, wantCode: "not_found"},
+		{name: "store failure", id: id.String(), store: deleteReturning(errStoreDown),
+			wantStatus: http.StatusInternalServerError, wantCode: "internal_error"},
+	}, newProjectStore, func(s *fakeProjectStore) http.HandlerFunc { return handleDeleteProject(s) })
 }
