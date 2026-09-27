@@ -6,9 +6,16 @@ import { deleteExperiment } from "@/app/experiments/actions";
 type Props = {
   id: string;
   title: string;
+  // Set where the delete should land back on the project's page (see
+  // deleteExperiment); left out, it goes to the cross-project list.
+  projectId?: string;
 };
 
-export default function DeleteExperimentButton({ id, title }: Props) {
+export default function DeleteExperimentButton({
+  id,
+  title,
+  projectId,
+}: Props) {
   const [confirming, setConfirming] = useState(false);
 
   if (confirming) {
@@ -19,6 +26,9 @@ export default function DeleteExperimentButton({ id, title }: Props) {
         </span>
         <form action={deleteExperiment}>
           <input type="hidden" name="id" value={id} />
+          {projectId && (
+            <input type="hidden" name="projectId" value={projectId} />
+          )}
           <button
             type="submit"
             className="font-medium text-red-600 underline hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"

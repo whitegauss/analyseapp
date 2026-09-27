@@ -79,3 +79,23 @@ export function parseColumnsField(
 
   return { ok: true, columns: checked };
 }
+
+// A project id is a UUID; anything else is not one of ours.
+const PROJECT_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Where to land after deleting an experiment: back on its project's page
+ * when the delete came from there (or from the experiment's own page, which
+ * no longer exists), otherwise the cross-project list.
+ *
+ * The form posts only a project id, never a path, and the id has to look
+ * like one -- a redirect target taken straight from the request would let
+ * anyone build a link that deletes and then sends the user off-site.
+ */
+export function pathAfterDelete(projectId: FormDataEntryValue | null): string {
+  if (typeof projectId === "string" && PROJECT_ID_PATTERN.test(projectId)) {
+    return `/projects/${projectId}`;
+  }
+  return "/experiments";
+}

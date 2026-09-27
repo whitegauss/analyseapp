@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseColumnsField } from "./experimentForm";
+import { parseColumnsField, pathAfterDelete } from "./experimentForm";
 
 describe("parseColumnsField", () => {
   it("accepts a well-formed column map", () => {
@@ -150,5 +150,23 @@ describe("parseColumnsField", () => {
     // shape -- so ordinary physics numbers must still go through.
     const result = parseColumnsField('{"x":[-1.5,0,2e3],"y":[0.001,-4,5]}');
     expect(result.ok).toBe(true);
+  });
+});
+
+describe("pathAfterDelete", () => {
+  it("returns to the project the experiment was deleted from", () => {
+    expect(pathAfterDelete("0b6f3c1e-8a2d-4f5b-9c7e-1d2e3f4a5b6c")).toBe(
+      "/projects/0b6f3c1e-8a2d-4f5b-9c7e-1d2e3f4a5b6c",
+    );
+  });
+
+  it.each([
+    ["no project id", null],
+    ["an empty one", ""],
+    ["a path", "../../evil"],
+    ["an external URL", "//evil.example.com"],
+    ["a UUID with more after it", "0b6f3c1e-8a2d-4f5b-9c7e-1d2e3f4a5b6c/x"],
+  ])("falls back to the experiment list for %s", (_, projectId) => {
+    expect(pathAfterDelete(projectId)).toBe("/experiments");
   });
 });

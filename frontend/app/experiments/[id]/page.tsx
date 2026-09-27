@@ -9,6 +9,7 @@ import FitEditor from "@/components/FitEditor";
 import RawDataEditor from "@/components/RawDataEditor";
 import ExperimentProjectActions from "@/components/ExperimentProjectActions";
 import CenteredCard from "@/components/CenteredCard";
+import DeleteExperimentButton from "@/components/DeleteExperimentButton";
 import type { ProjectSummary } from "@/lib/dashboard";
 
 export const dynamic = "force-dynamic";
@@ -98,6 +99,11 @@ export default async function ExperimentPage({
         >
           CSVダウンロード
         </a>
+        <DeleteExperimentButton
+          id={experiment.id}
+          title={experiment.title ?? "(無題)"}
+          projectId={experiment.project_id}
+        />
       </div>
     </CenteredCard>
   );
