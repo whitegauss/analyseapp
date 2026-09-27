@@ -7,7 +7,7 @@ import type {
   ExperimentConfig,
   LinearRegressionResult,
 } from "@/lib/experiment";
-import { parseColumnsField } from "@/lib/experimentForm";
+import { parseColumnsField, pathAfterDelete } from "@/lib/experimentForm";
 import { mergeConfig, parseFitForm, type FitConfig } from "@/lib/fit";
 
 type Experiment = { id: string };
@@ -214,9 +214,14 @@ export async function moveExperiment(
   );
 }
 
+// Deletes an experiment and lands wherever the delete came from: its
+// project's page when the form says which project (the project page, and
+// the experiment's own page, which is gone once this succeeds), otherwise
+// the cross-project list.
 export async function deleteExperiment(formData: FormData): Promise<void> {
   const id = String(formData.get("id") ?? "");
   if (!id) return;
+  const destination = pathAfterDelete(formData.get("projectId"));
 
   let result: { id: string } | null;
   try {
@@ -224,8 +229,10 @@ export async function deleteExperiment(formData: FormData): Promise<void> {
       method: "DELETE",
     });
   } catch (e) {
+    // Already gone (deleted in another tab): the outcome the user asked
+    // for, so carry on to the same place.
     if (e instanceof GoApiError && e.status === 404) {
-      redirect("/experiments");
+      redirect(destination);
     }
     throw e;
   }
@@ -234,7 +241,7 @@ export async function deleteExperiment(formData: FormData): Promise<void> {
     redirect("/login");
   }
 
-  redirect("/experiments");
+  redirect(destination);
 }
 
 // Runs a linear_regression analysis for an experiment. Best-effort, same as

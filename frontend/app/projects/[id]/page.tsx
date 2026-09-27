@@ -4,6 +4,7 @@ import { callGoApi, GoApiError } from "@/lib/api";
 import type { ExperimentSummary, ProjectSummary } from "@/lib/dashboard";
 import ExperimentEditor from "@/components/ExperimentEditor";
 import CenteredCard from "@/components/CenteredCard";
+import DeleteExperimentButton from "@/components/DeleteExperimentButton";
 
 export const dynamic = "force-dynamic";
 
@@ -64,10 +65,15 @@ export default async function ProjectPage({
         ) : (
           <ul className="flex flex-col divide-y divide-zinc-200 dark:divide-zinc-800">
             {experiments.map((experiment) => (
-              <li key={experiment.id}>
+              <li
+                key={experiment.id}
+                className="flex items-center gap-4 hover:bg-zinc-50 dark:hover:bg-zinc-800"
+              >
+                {/* The delete button sits beside the link, not inside it:
+                    a button within an <a> would navigate on every click. */}
                 <Link
                   href={`/experiments/${experiment.id}`}
-                  className="flex items-center justify-between gap-4 py-3 hover:bg-zinc-50 dark:hover:bg-zinc-800"
+                  className="flex min-w-0 flex-1 items-center justify-between gap-4 py-3"
                 >
                   <span className="truncate text-sm text-zinc-900 dark:text-zinc-50">
                     {experiment.title ?? "(無題)"}
@@ -76,6 +82,11 @@ export default async function ProjectPage({
                     {experiment.created_at.slice(0, 10)}
                   </span>
                 </Link>
+                <DeleteExperimentButton
+                  id={experiment.id}
+                  title={experiment.title ?? "(無題)"}
+                  projectId={project.id}
+                />
               </li>
             ))}
           </ul>
