@@ -20,7 +20,11 @@ import (
 // tests, so handler validation/status-code logic is testable without a
 // database. Unset function fields fail the test if called.
 type fakeStore struct {
-	t               *testing.T
+	t *testing.T
+	// ensureProfileFn is optional, unlike the rest: nil means EnsureProfile
+	// succeeds, which is what every handler test but the create path's
+	// needs.
+	ensureProfileFn func(ctx context.Context, userID uuid.UUID) error
 	createFn        func(ctx context.Context, userID, projectID uuid.UUID, title *string, rawData, config map[string]any) (experiments.Experiment, error)
 	getByIDFn       func(ctx context.Context, id, userID uuid.UUID) (experiments.Experiment, error)
 	listByUserFn    func(ctx context.Context, userID uuid.UUID) ([]experiments.Experiment, error)
@@ -33,7 +37,10 @@ type fakeStore struct {
 }
 
 func (f *fakeStore) EnsureProfile(ctx context.Context, userID uuid.UUID) error {
-	return nil
+	if f.ensureProfileFn == nil {
+		return nil
+	}
+	return f.ensureProfileFn(ctx, userID)
 }
 
 func (f *fakeStore) Create(ctx context.Context, userID, projectID uuid.UUID, title *string, rawData, config map[string]any) (experiments.Experiment, error) {
