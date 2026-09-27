@@ -110,7 +110,7 @@ Python Workerは`WORKER_PYTHON`、`backend/worker/.venv/bin/python`、`python3`�
 
 デプロイ先は VPS 上の k3s（PDR §4）。現時点で出来ているのは **GHCR へのイメージ push まで**で、VPS・マニフェスト・ArgoCD は未着手（KAN-32）。
 
-CI の`images`ジョブが3イメージをビルドします。PR ではビルドだけ（Dockerfile の破損検知）、`main`では3つのテストジョブが通った後に push します。
+CI の`images`ジョブが3つのテストジョブの後に3イメージをビルドします（PR でも走るので Dockerfile の破損を PR で検知できる。読み取り権限のみ）。`main`では、3イメージのビルドが**すべて**通った後に`publish-images`ジョブが push します（GHCR への書き込み権限はこのジョブだけ。1つでもビルドが落ちたら1つも push しない）。
 
 | イメージ | 中身 |
 | --- | --- |
@@ -120,7 +120,7 @@ CI の`images`ジョブが3イメージをビルドします。PR ではビル�
 
 タグは commit SHA のみで`latest`は付けません。
 
-- **`NEXT_PUBLIC_SUPABASE_URL`/`NEXT_PUBLIC_SUPABASE_ANON_KEY`はビルド時にブラウザ向けバンドルへ埋め込まれる**ため、実行時の環境変数では差し替えられません。GitHub の Settings → Secrets and variables → Actions → **Variables**（公開される値なので Secret ではない）に登録してください。未登録のまま`main`に push すると frontend のジョブが変数名を出して落ちます（空の値を焼いた壊れたイメージを push しないため）
+- **`NEXT_PUBLIC_SUPABASE_URL`/`NEXT_PUBLIC_SUPABASE_ANON_KEY`はビルド時にブラウザ向けバンドルへ埋め込まれる**ため、実行時の環境変数では差し替えられません。GitHub の Settings → Secrets and variables → Actions → **Variables**（公開される値なので Secret ではない）に登録してください。未登録のまま`main`に push すると frontend のビルドが変数名を出して落ち、3イメージとも push されません（空の値を焼いた壊れたイメージを push しないため）
 - GHCR のパッケージは初回 push 時に **private** で作られます。k3s から pull するには imagePullSecret を置くか、パッケージを public にする必要があります
 
 ## API（experiments）
