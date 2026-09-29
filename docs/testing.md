@@ -29,13 +29,19 @@ TEST_DATABASE_URL='postgres://postgres:postgres@localhost:5433/postgres?sslmode=
 
 ### Go
 
-ハンドラーは[インターフェース経由で依存を受け取る](architecture.md#依存を注入する境界テストが成立している理由)ので、DB も Redis も立てずに回る。フェイク（`fakeStore` / `fakeProjectStore`）は現状 `backend/api/internal/httpserver/experiments_test.go` と `projects_test.go` にそれぞれ置いてある（共通ファイルへの分離は KAN-38）。
+ハンドラーは[インターフェース経由で依存を受け取る](architecture.md#依存を注入する境界テストが成立している理由)ので、DB も Redis も立てずに回る。フェイクは `backend/api/internal/httpserver/fakes_test.go`、リクエストの組み立てと表駆動の型（`handlerCase` / `runHandlerCases`）は `helpers_test.go` にある（KAN-38 / 42）。
 
 検証やエラー写像は `backend/api/internal/httpserver/errors.go` / `backend/api/internal/httpserver/validate.go` に純粋関数として出してある。**ハンドラー経由でしか踏めない分岐を作らないこと** — `writeExperimentError` はかつてカバレッジ 75% で、それは「500 になる分岐が一度も実行されていない」という意味だった。
 
 ### フロントエンド
 
 計算は `lib/` に置き、コンポーネントは呼ぶだけにする（[依存の向き](architecture.md#lib-と-components-の依存の向き)）。
+
+**コンポーネントのテストは story の play 関数に書く**（KAN-51）。`components/X.stories.tsx` の各 story に `play` を付け、`canvas` への問い合わせと `userEvent` の操作、`fn()` で渡したコールバックへの `expect` で確かめる。`npm run test` が `@storybook/addon-vitest` 経由で**実際の Chromium**の中で全 story の play を走らせるので、story は UI カタログであると同時にテストになる。型見本は `components/InlineEditCard.stories.tsx`。
+
+- 計算の正しさは play で確かめない。それは `lib/` の単体テストの仕事で、play が見るのは「入力が画面とコールバックに届いているか」だけ
+- `npm run test:unit` は純粋関数のテストだけを node で走らせる（ブラウザも Storybook も読み込まないので速い）
+- 初回だけ `npx playwright install chromium` が要る（WSL / Ubuntu 24.04 では `libasound2t64` も）
 
 **`useMemo` の中に書かれた計算は特に見落としやすい。** 実例: 回帰の ±1σ 帯を求める `boundsAt` は `regressionBand` の `useMemo` の中にインラインで書かれていて、コンポーネントを描画しない限り触れなかった。物理実験の誤差帯という、間違えても画面上は「それっぽく」見えてしまう計算がテスト不能な位置にあった。
 
@@ -74,12 +80,12 @@ TEST_DATABASE_URL=... go test -tags=integration ./...
 
 ## 使う道具
 
-**入れない**もの: testify、Jest、Playwright、スナップショットテスト。
+**入れない**もの: testify、Jest、スナップショットテスト。Playwright はブラウザの供給役としてだけ入っている（E2E は書かない）。
 
 | 領域     | 道具                                                                      |
 | -------- | ------------------------------------------------------------------------- |
 | Go       | 標準 `testing` + `net/http/httptest`。Redis は `miniredis`、Postgres は使い捨てコンテナ（testcontainers は入れない — 接続文字列1つで足りる） |
-| フロント | Vitest。UI は今後 jsdom + Testing Library + Storybook の `composeStories` |
+| フロント | Vitest。純粋関数は node、コンポーネントは Storybook の play 関数を `@storybook/addon-vitest` で Chromium 上に |
 | Python   | pytest                                                                    |
 
 ## 現状固定テスト

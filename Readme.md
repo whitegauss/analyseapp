@@ -94,7 +94,8 @@ Python Workerは`WORKER_PYTHON`、`backend/worker/.venv/bin/python`、`python3`�
 ### スタックごとに実行する
 
 - フロントエンド: `cd frontend && npm install`
-  - テスト: `npm run test`（[Vitest](https://vitest.dev/)。`lib/pasteDataParsing.ts`の貼り付けデータパース、`components/AxisLabel.tsx`の`$...$`区切りロジック、`components/ExperimentChart.tsx`の有効数字丸めロジックなど、純粋関数のみを対象。コンポーネントのレンダリングは未カバー — `environment: "node"`のため）
+  - テスト: `npm run test`（[Vitest](https://vitest.dev/) の2プロジェクト。`unit` は`lib/`などの純粋関数を node で、`storybook` は各 story の play 関数を実際の Chromium で走らせる。純粋関数だけなら`npm run test:unit`が速い）。**初回だけ`npx playwright install chromium`が要る**（WSL / Ubuntu 24.04 では`sudo apt-get install -y libasound2t64`も）
+  - UI カタログ: `npm run storybook`（http://localhost:6006）。story は`components/*.stories.tsx`で、play 関数がそのままコンポーネントのテストになる
   - Lint: `npm run lint`（ESLint / `eslint-config-next`）
   - フォーマット: `npm run format`で整形、`npm run format:check`でCIと同じチェックのみ（[Prettier](https://prettier.io/)、`.prettierrc.json`）
   - ビルド: `npx next build`

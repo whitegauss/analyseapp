@@ -9,7 +9,10 @@
     "lint": "eslint",
     "test": "vitest run",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "test:unit": "vitest run --config vitest.unit.config.mts",
+    "storybook": "storybook dev -p 6006",
+    "build-storybook": "storybook build"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.4",
@@ -22,19 +25,26 @@
     "react-plotly.js": "^4.1.0"
   },
   "devDependencies": {
+    "@storybook/addon-vitest": "^10.6.0",
+    "@storybook/nextjs-vite": "^10.6.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/plotly.js": "^3.0.13",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/react-plotly.js": "^2.6.4",
+    "@vitest/browser": "^4.1.11",
+    "@vitest/browser-playwright": "^4.1.11",
     "@vitest/coverage-v8": "^4.1.11",
     "eslint": "^9",
     "eslint-config-next": "16.3.0",
     "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-storybook": "^10.6.0",
+    "playwright": "^1.63.0",
     "prettier": "^3.9.6",
+    "storybook": "^10.6.0",
     "tailwindcss": "^4",
     "typescript": "^5",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   }
 }
