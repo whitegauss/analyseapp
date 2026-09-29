@@ -25,7 +25,20 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run format:check
+      # The storybook test project runs every story's play function in a
+      # real Chromium (KAN-51). The browser binary is cached by Playwright
+      # version; the system libraries it needs are installed every run
+      # (--with-deps), which is quick and not worth caching.
+      - id: playwright
+        run: echo "version=$(node -p "require('playwright/package.json').version")" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+      - run: npx playwright install --with-deps chromium
       - run: npm run test
+      # A smoke check only: the catalogue must build. Nothing is deployed.
+      - run: npm run build-storybook
       - run: npx next build
 
   api:
