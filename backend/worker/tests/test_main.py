@@ -211,3 +211,36 @@ def test_analyze_curve_fit_failure_is_400_envelope_not_500():
     body = res.json()
     assert body["data"] is None
     assert body["error"]["code"] == "fit_failed"
+
+
+# --------------------------------------------------------------------------
+# HTTP だけが持つもの: trace ID ミドルウェアと、空の columns (KAN-46)
+# --------------------------------------------------------------------------
+
+
+def test_trace_id_from_the_caller_is_echoed_back():
+    # The Go API sends its own trace ID (KAN-43 pins that end), so the two
+    # services' logs for one analysis share it.
+    res = client.get("/healthz", headers={"X-Trace-Id": "trace-from-go"})
+
+    assert res.headers["X-Trace-Id"] == "trace-from-go"
+
+
+def test_trace_id_is_generated_when_the_caller_sends_none():
+    first = client.get("/healthz").headers.get("X-Trace-Id")
+    second = client.get("/healthz").headers.get("X-Trace-Id")
+
+    assert first and second
+    assert first != second
+
+
+def test_analyze_with_no_columns_reports_the_missing_one():
+    # An empty columns map passes the schema (nothing to compare lengths
+    # of) and the request log's row count falls back to 0; the analysis is
+    # what rejects it, naming what it needed.
+    res = client.post("/analyze", json={"type": "linear_regression", "data": {"columns": {}}})
+
+    assert res.status_code == 400
+    body = res.json()
+    assert body["error"]["code"] == "missing_column"
+    assert "'x'" in body["error"]["message"]
