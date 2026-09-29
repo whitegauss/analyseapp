@@ -61,3 +61,15 @@ export const WithError: Story = {
     await expect(canvas.getByText(args.error!)).toBeInTheDocument();
   },
 };
+
+// The editor decides when its input is not worth submitting (FitEditor with
+// a formula that does not parse).
+export const SubmitDisabled: Story = {
+  args: { editing: true, submitDisabled: true },
+  play: async ({ canvas }) => {
+    await expect(canvas.getByRole("button", { name: "保存" })).toBeDisabled();
+    await expect(
+      canvas.getByRole("button", { name: "キャンセル" }),
+    ).toBeEnabled();
+  },
+};
