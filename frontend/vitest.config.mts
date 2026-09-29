@@ -35,6 +35,14 @@ export default defineConfig({
             configDir: path.join(import.meta.dirname, ".storybook"),
           }),
         ],
+        // Everything the stories import at run time, pre-bundled up front.
+        // Otherwise Vite discovers them while the first stories are
+        // loading, reloads the page, and those files fail with "Vitest
+        // failed to find the current suite" -- every time on a fresh
+        // install, which is every CI run (KAN-51).
+        optimizeDeps: {
+          include: ["react"],
+        },
         test: {
           name: "storybook",
           browser: {
