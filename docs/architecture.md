@@ -64,9 +64,11 @@ func NewRouter(dbPool *pgxpool.Pool, jwks keyfunc.Keyfunc,
 外側から:
 
 ```
-Recoverer → logging → metrics → securityHeaders → ClientIPFromRemoteAddr
-  → [/api/v1 のみ] httprate → auth
+Recoverer → logging → metrics → securityHeaders
+  → [/api/v1 のみ] auth → httprate（ユーザーごと）
 ```
+
+**`/api/v1` は認証が先、レート制限が後**（`apiMiddlewares`）。制限はログインユーザー（JWT のユーザー ID）ごとに数えるので、ユーザーが分かってからでないと数えられない。接続元 IP で数えないのは、Go を呼ぶのが常に Next のサーバーで、IP だと全員が 1 つの枠を共有してしまうため（KAN-89）。認証に失敗したリクエストは 401 で止まり、誰の枠も使わない。
 
 **この順序には既知の問題がある。** `Recoverer` が `logging` / `metrics` より外側にあり、両者が記録を `defer` せずに行っているため、**panic したリクエストはメトリクスにもログにも残らない**（KAN-67）。触るときは注意すること。
 

@@ -1,6 +1,7 @@
 package httpserver
 
 import (
+	"errors"
 	"net/http"
 	"time"
 
@@ -20,7 +21,7 @@ import (
 	"analyseapp/api/internal/worker"
 )
 
-// apiRateLimit caps each client IP to this many /api/v1 requests per
+// apiRateLimit caps each signed-in user to this many /api/v1 requests per
 // apiRateLimitWindow. A generous baseline for a small app: well above normal
 // UI usage (a page load fires a handful of requests), but low enough to
 // blunt an abusive script hammering the (Worker-calling, DB-hitting)
@@ -45,14 +46,6 @@ func NewRouter(dbPool *pgxpool.Pool, jwks keyfunc.Keyfunc, workerClient worker.C
 	r.Use(logging.Middleware)
 	r.Use(metrics.Middleware)
 	r.Use(securityHeaders)
-	// Resolves the client IP from the TCP connection, not from a
-	// client-supplied header -- correct as long as this service is exposed
-	// directly (docker-compose maps its port straight to the host, no
-	// reverse proxy in front of it today). If a reverse proxy is added
-	// later, switch to middleware.ClientIPFromXFF/ClientIPFromHeader with
-	// its trusted CIDR/hop count, or every client behind it would share one
-	// rate-limit bucket.
-	r.Use(middleware.ClientIPFromRemoteAddr)
 
 	r.Get("/healthz", handleHealthz)
 	r.Get("/readyz", handleReadyz(dbPool))
@@ -60,13 +53,7 @@ func NewRouter(dbPool *pgxpool.Pool, jwks keyfunc.Keyfunc, workerClient worker.C
 
 	if jwks != nil {
 		r.Route("/api/v1", func(r chi.Router) {
-			r.Use(httprate.LimitBy(apiRateLimit, apiRateLimitWindow,
-				func(r *http.Request) (string, error) {
-					return httprate.CanonicalizeIP(middleware.GetClientIP(r.Context())), nil
-				},
-				httprate.WithLimitHandler(handleRateLimited),
-			))
-			r.Use(auth.Middleware(jwks))
+			r.Use(apiMiddlewares(auth.Middleware(jwks), apiRateLimit, apiRateLimitWindow)...)
 
 			if dbPool != nil {
 				registerAPIRoutes(r,
@@ -81,6 +68,41 @@ func NewRouter(dbPool *pgxpool.Pool, jwks keyfunc.Keyfunc, workerClient worker.C
 
 	return r
 }
+
+// apiMiddlewares is what every /api/v1 request passes through, in order:
+// authentication, then the rate limit.
+//
+// The order is the point. The limit is counted per user (KAN-89), and the
+// user is only known once authenticate has verified the JWT. Counting by IP
+// instead, as this used to, counts the wrong thing here: the browser never
+// calls this API -- the Next.js server does, for everyone -- so every user
+// shared the Next container's one bucket. A user ID from a verified token
+// cannot be spoofed, so no header has to be trusted either, whatever sits
+// in front (Cloudflare, a reverse proxy).
+//
+// A request that fails authentication is answered 401 before reaching the
+// limiter and uses none of anyone's allowance. Its cost stops at checking a
+// signature against cached keys; bulk unauthenticated traffic is for the
+// edge (Cloudflare) to limit, which sees the real client IP.
+func apiMiddlewares(authenticate func(http.Handler) http.Handler, limit int, window time.Duration) []func(http.Handler) http.Handler {
+	return []func(http.Handler) http.Handler{
+		authenticate,
+		httprate.LimitBy(limit, window,
+			func(r *http.Request) (string, error) {
+				userID, ok := auth.UserID(r.Context())
+				if !ok {
+					// Unreachable after authenticate. Refusing is safer than
+					// pooling such requests under one shared key.
+					return "", errNoUserForRateLimit
+				}
+				return userID.String(), nil
+			},
+			httprate.WithLimitHandler(handleRateLimited),
+		),
+	}
+}
+
+var errNoUserForRateLimit = errors.New("rate limit: no authenticated user in context")
 
 // registerAPIRoutes hangs every DB-backed /api/v1 route off r. Split out of
 // NewRouter, and taking the stores rather than the pool, so the routing
