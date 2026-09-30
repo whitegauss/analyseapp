@@ -1,23 +1,18 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { constantNames, functionNames } from "@/lib/formula";
+import { formatToPrecision } from "@/lib/significantFigures";
 import {
-  propagate,
-  type MeasuredValue,
-  type PropagationResult,
-} from "@/lib/errorPropagation";
-import {
-  constantNames,
-  FormulaError,
-  functionNames,
-  parseFormula,
-  type ParsedFormula,
-} from "@/lib/formula";
-import {
-  formatToPrecision,
-  formatUncertainty,
-  roundToUncertainty,
-} from "@/lib/significantFigures";
+  allValuesFilled,
+  computePropagation,
+  entryOf,
+  formatPropagation,
+  readFormula,
+  withEntry,
+  type Entries,
+  type Entry,
+} from "@/lib/tools/errorPropagationForm";
 
 const EXAMPLES = [
   { label: "単振り子の周期", formula: "2*pi*sqrt(L/g)" },
@@ -31,27 +26,11 @@ const EXAMPLES = [
 const inputClass =
   "w-28 rounded-md border border-zinc-300 px-2 py-1 text-right tabular-nums dark:border-zinc-700 dark:bg-zinc-900";
 
-// Entered text is kept per variable name rather than per row, so editing the
-// formula (adding a term, fixing a typo) keeps the numbers already typed for
-// every name that survives the edit.
-type Entry = { value: string; uncertainty: string };
-
 export default function ErrorPropagationCalculator() {
   const [source, setSource] = useState("2*pi*sqrt(L/g)");
-  const [entries, setEntries] = useState<Record<string, Entry>>({});
+  const [entries, setEntries] = useState<Entries>({});
 
-  const parsed = useMemo((): {
-    formula: ParsedFormula | null;
-    error: string | null;
-  } => {
-    if (source.trim() === "") return { formula: null, error: null };
-    try {
-      return { formula: parseFormula(source), error: null };
-    } catch (e) {
-      if (e instanceof FormulaError) return { formula: null, error: e.message };
-      throw e;
-    }
-  }, [source]);
+  const parsed = useMemo(() => readFormula(source), [source]);
 
   // Memoised so the identity is stable while the formula is unchanged: the
   // propagation below depends on it, and a fresh [] each render would redo
@@ -61,63 +40,17 @@ export default function ErrorPropagationCalculator() {
     [parsed.formula],
   );
 
-  const result = useMemo((): PropagationResult | null => {
-    if (!parsed.formula || variables.length === 0) return null;
+  const result = useMemo(
+    () => computePropagation(parsed.formula, variables, entries),
+    [parsed.formula, variables, entries],
+  );
 
-    const measured: Record<string, MeasuredValue> = Object.create(null);
-    for (const name of variables) {
-      const entry = entryOf(entries, name);
-      if (!entry || entry.value.trim() === "") return null;
-      const value = Number(entry.value);
-      // A blank uncertainty means "exact", which is how constants written
-      // into the formula as a name (g, c, ...) are meant to behave.
-      const uncertainty =
-        entry.uncertainty.trim() === "" ? 0 : Number(entry.uncertainty);
-      if (!Number.isFinite(value) || !Number.isFinite(uncertainty)) return null;
-      measured[name] = { value, uncertainty: Math.abs(uncertainty) };
-    }
-
-    try {
-      const propagated = propagate(parsed.formula, measured);
-      // The uncertainty is checked as well as the value: sqrt(x) at x = 0 has
-      // a finite value and an infinite derivative, and formatUncertainty
-      // renders a non-finite uncertainty as "0.0" -- an exact-looking answer
-      // to a formula that is anything but.
-      if (
-        !Number.isFinite(propagated.value) ||
-        !Number.isFinite(propagated.uncertainty)
-      ) {
-        return null;
-      }
-      return propagated;
-    } catch {
-      return null;
-    }
-  }, [parsed.formula, variables, entries]);
-
-  const allFilled =
-    variables.length > 0 &&
-    variables.every(
-      (name) => (entryOf(entries, name)?.value ?? "").trim() !== "",
-    );
+  const allFilled = allValuesFilled(variables, entries);
 
   const setEntry = (name: string, patch: Partial<Entry>) =>
-    setEntries((current) => {
-      const next: Record<string, Entry> = Object.create(null);
-      Object.assign(next, current);
-      const existing = entryOf(current, name);
-      next[name] = {
-        value: existing?.value ?? "",
-        uncertainty: existing?.uncertainty ?? "",
-        ...patch,
-      };
-      return next;
-    });
+    setEntries((current) => withEntry(current, name, patch));
 
-  const { rounded, decimals } = roundToUncertainty(
-    result?.value ?? 0,
-    result?.uncertainty ?? null,
-  );
+  const display = result ? formatPropagation(result) : null;
 
   return (
     <div className="flex flex-col gap-4">
@@ -259,17 +192,14 @@ export default function ErrorPropagationCalculator() {
         </table>
       )}
 
-      {result ? (
+      {display ? (
         <div className="flex flex-col gap-1">
           <p className="text-lg font-medium text-zinc-900 dark:text-zinc-50">
-            z = {rounded.toFixed(decimals)} ±{" "}
-            {formatUncertainty(result.uncertainty)}
+            {display.line}
           </p>
-          {result.value !== 0 && result.uncertainty > 0 && (
+          {display.relative && (
             <p className="text-sm text-zinc-600 dark:text-zinc-400">
-              相対不確かさ{" "}
-              {((result.uncertainty / Math.abs(result.value)) * 100).toFixed(2)}
-              %
+              相対不確かさ {display.relative}
             </p>
           )}
         </div>
@@ -283,14 +213,4 @@ export default function ErrorPropagationCalculator() {
       )}
     </div>
   );
-}
-
-// Variable names come from the formula the user typed, so a plain property
-// read would resolve `constructor` or `toString` to something inherited --
-// and `entry.value.trim()` on a function is a crash, not a wrong number.
-function entryOf(
-  entries: Record<string, Entry>,
-  name: string,
-): Entry | undefined {
-  return Object.hasOwn(entries, name) ? entries[name] : undefined;
 }

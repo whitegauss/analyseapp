@@ -1,10 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import {
-  formatUncertainty,
-  roundToUncertainty,
-} from "@/lib/significantFigures";
+import { formatRoundedValue } from "@/lib/tools/significantFigureForm";
 
 const inputClass =
   "w-40 rounded-md border border-zinc-300 px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900";
@@ -13,23 +10,7 @@ export default function SignificantFigureRounder() {
   const [value, setValue] = useState("");
   const [uncertainty, setUncertainty] = useState("");
 
-  const parsedValue = Number(value);
-  const parsedUncertainty = Number(uncertainty);
-  const valid =
-    value !== "" &&
-    uncertainty !== "" &&
-    Number.isFinite(parsedValue) &&
-    Number.isFinite(parsedUncertainty);
-
-  const result = valid
-    ? (() => {
-        const { rounded, decimals } = roundToUncertainty(
-          parsedValue,
-          parsedUncertainty,
-        );
-        return `${rounded.toFixed(decimals)} ± ${formatUncertainty(parsedUncertainty)}`;
-      })()
-    : null;
+  const result = formatRoundedValue(value, uncertainty);
 
   return (
     <div className="flex flex-col gap-3">

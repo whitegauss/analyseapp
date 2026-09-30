@@ -2,21 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { parsePastedText } from "@/lib/pasteDataParsing";
-import { computeColumnStats } from "@/lib/statistics";
-import {
-  formatUncertainty,
-  roundToUncertainty,
-} from "@/lib/significantFigures";
-
-// Rounds the mean to the sem's leading significant digit, same convention as
-// the regression slope/intercept display. A null/zero sem (n < 2, or every
-// value identical) falls back to roundToUncertainty's own fixed-precision
-// default rather than a meaningless rounding place.
-function formatMean(mean: number, sem: number | null): string {
-  if (!Number.isFinite(mean)) return "-";
-  const { rounded, decimals } = roundToUncertainty(mean, sem ?? -1);
-  return rounded.toFixed(decimals);
-}
+import { splitColumns, summarizeColumn } from "@/lib/tools/measurementStats";
 
 // Not tied to a saved experiment -- paste any list of numbers (one or more
 // columns) and get per-column descriptive statistics, independent of
@@ -27,17 +13,7 @@ export default function MeasurementStatsCalculator() {
   const [pastedText, setPastedText] = useState("");
   const parsed = useMemo(() => parsePastedText(pastedText), [pastedText]);
 
-  const columns = useMemo(() => {
-    if (parsed.error || parsed.rows.length === 0) return [];
-    const cols: number[][] = Array.from(
-      { length: parsed.columnCount },
-      () => [],
-    );
-    for (const row of parsed.rows) {
-      row.forEach((cell, i) => cols[i].push(Number(cell)));
-    }
-    return cols;
-  }, [parsed]);
+  const columns = useMemo(() => splitColumns(parsed), [parsed]);
 
   return (
     <div className="flex flex-col gap-3">
@@ -69,7 +45,7 @@ export default function MeasurementStatsCalculator() {
             </thead>
             <tbody>
               {columns.map((values, i) => {
-                const { n, mean, stdev, sem } = computeColumnStats(values);
+                const { n, mean, stdev } = summarizeColumn(values);
                 return (
                   <tr
                     key={i}
@@ -82,12 +58,10 @@ export default function MeasurementStatsCalculator() {
                       {n}
                     </td>
                     <td className="py-1 pr-4 text-zinc-700 dark:text-zinc-300">
-                      {sem !== null && sem > 0
-                        ? `${formatMean(mean, sem)} ± ${formatUncertainty(sem)}`
-                        : formatMean(mean, sem)}
+                      {mean}
                     </td>
                     <td className="py-1 pr-4 text-zinc-700 dark:text-zinc-300">
-                      {stdev !== null ? formatUncertainty(stdev) : "-"}
+                      {stdev}
                     </td>
                   </tr>
                 );
