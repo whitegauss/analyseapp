@@ -1,22 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
+import { unwrapEnvelope, type Envelope } from "@/lib/envelope";
 
-// Mirrors the Go API's {data, error, meta} envelope (PDR.md section 8).
-export type Envelope<T> = {
-  data: T | null;
-  error: { code: string; message: string } | null;
-  meta: Record<string, unknown>;
-};
-
-export class GoApiError extends Error {
-  status: number;
-  code: string;
-
-  constructor(status: number, code: string, message: string) {
-    super(message);
-    this.status = status;
-    this.code = code;
-  }
-}
+export { GoApiError, unwrapEnvelope, type Envelope } from "@/lib/envelope";
 
 /**
  * Calls the Go API on behalf of the current Supabase session. The browser
@@ -49,12 +34,5 @@ export async function callGoApi<T>(
   });
 
   const body = (await res.json()) as Envelope<T>;
-  if (!res.ok || body.error) {
-    throw new GoApiError(
-      res.status,
-      body.error?.code ?? "unknown_error",
-      body.error?.message ?? `HTTP ${res.status}`,
-    );
-  }
-  return body.data;
+  return unwrapEnvelope(res.status, res.ok, body);
 }
