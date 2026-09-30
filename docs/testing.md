@@ -41,6 +41,8 @@ TEST_DATABASE_URL='postgres://postgres:postgres@localhost:5433/postgres?sslmode=
 
 - 計算の正しさは play で確かめない。それは `lib/` の単体テストの仕事で、play が見るのは「入力が画面とコールバックに届いているか」だけ
 - `npm run test:unit` は純粋関数のテストだけを node で走らせる（ブラウザも Storybook も読み込まないので速い）
+- **Server Action を直接 import するコンポーネント**（`DeleteExperimentButton` など）も story にできる。`.storybook/preview.ts` の `sb.mock(import("../app/experiments/actions.ts"))` がモジュールごと差し替えるので、submit しても実物は走らず、`mocked(deleteExperiment).mock.calls` で渡った `FormData` を確かめられる。各 story の `beforeEach` で `mockReset()` すること。別の actions モジュールを使うコンポーネントを足すときは、そのモジュールも preview.ts に登録する
+- `spyOn` で記録した引数は Storybook の計測が包んだものなので、関数の同一性（`toBe`）では比べられない。回数で確かめる（`ToolsMenu.stories.tsx`）
 - 初回だけ `npx playwright install chromium` が要る（WSL / Ubuntu 24.04 では `libasound2t64` も）
 
 **`useMemo` の中に書かれた計算は特に見落としやすい。** 実例: 回帰の ±1σ 帯を求める `boundsAt` は `regressionBand` の `useMemo` の中にインラインで書かれていて、コンポーネントを描画しない限り触れなかった。物理実験の誤差帯という、間違えても画面上は「それっぽく」見えてしまう計算がテスト不能な位置にあった。
