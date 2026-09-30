@@ -1,9 +1,8 @@
 import { redirect } from "next/navigation";
 import { callGoApi, GoApiError } from "@/lib/api";
 import { fetchRegression } from "@/app/experiments/actions";
-import ComparisonChart, {
-  type ComparedExperiment,
-} from "@/components/ComparisonChart";
+import ComparisonChart from "@/components/ComparisonChart";
+import type { ComparedExperiment } from "@/lib/chart/comparison";
 import { readAxisLabel, type LinearRegressionResult } from "@/lib/experiment";
 import { parseCompareIds } from "@/lib/compareParams";
 import CenteredCard from "@/components/CenteredCard";
